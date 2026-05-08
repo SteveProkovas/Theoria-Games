@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Light of Tabor</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#04030d;overflow:hidden;font-family:'Palatino Linotype','Book Antiqua',Palatino,Georgia,serif;cursor:none}
+canvas{display:block}
+.screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20;transition:opacity .6s}
+#s-menu{background:radial-gradient(ellipse at 50% 38%,#150d2a 0%,#04030d 68%)}
+#s-over,#s-win{display:none;background:rgba(4,3,13,.96)}
+.gt{font-size:46px;color:#d4a843;text-shadow:0 0 50px rgba(212,168,67,.35);letter-spacing:4px;margin-bottom:5px;text-align:center}
+.gs{font-size:11px;letter-spacing:7px;color:rgba(212,168,67,.35);text-transform:uppercase;margin-bottom:42px;text-align:center}
+.gl{max-width:430px;text-align:center;color:rgba(218,182,108,.5);font-size:13.5px;line-height:2.05;font-style:italic;margin-bottom:42px}
+.btn{background:transparent;border:1px solid rgba(212,168,67,.3);color:rgba(212,168,67,.72);padding:12px 40px;font-size:11px;letter-spacing:5px;text-transform:uppercase;cursor:pointer;font-family:inherit;transition:all .38s}
+.btn:hover{background:rgba(212,168,67,.06);border-color:rgba(212,168,67,.68);box-shadow:0 0 28px rgba(212,168,67,.12);color:#d4a843}
+.hint{margin-top:24px;font-size:10.5px;letter-spacing:1.8px;color:rgba(212,168,67,.26);text-align:center;line-height:2.3}
+.hint b{color:rgba(212,168,67,.48);font-weight:normal}
+.deco{font-size:13px;letter-spacing:14px;color:rgba(212,168,67,.22);margin:14px 0}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div class="screen" id="s-menu">
+  <div class="deco">✦ ✦ ✦</div>
+  <div class="gt">The Light of Tabor</div>
+  <div class="gs">A Hesychast's Vigil · Ἡ Μεταμόρφωσις</div>
+  <div class="gl">
+    On the holy mountain where Christ shone with uncreated light,<br>
+    you keep the night vigil alone.<br><br>
+    The <em>logismoi</em> — the eight passions of the fallen world —<br>
+    arise from darkness to extinguish the prayer of your heart.<br><br>
+    Maintain the Jesus Prayer. Let the divine light repel the darkness.<br>
+    Hold the vigil until dawn breaks over Tabor.
+  </div>
+  <button class="btn" id="btn-start">Begin the Vigil</button>
+  <div class="hint">
+    <b>Click</b> to fire prayer light · Aim with the mouse<br>
+    Click when the gold ring is brightest for <b>Perfect Prayer</b><br>
+    Fill the Theosis meter for a cross-shaped <b>Theosis Burst</b> · or press <b>Space</b>
+  </div>
+</div>
+
+<div class="screen" id="s-over">
+  <div class="deco">✦</div>
+  <div class="gt" style="font-size:36px;color:#8a3535;text-shadow:0 0 40px rgba(138,53,53,.38)">The Vigil Has Ended</div>
+  <div class="gs" style="color:rgba(175,95,95,.35)">The passions overcame the prayer</div>
+  <div class="gl" id="go-txt" style="color:rgba(212,155,120,.45)"></div>
+  <button class="btn" style="border-color:rgba(175,75,75,.28);color:rgba(195,98,98,.72)" id="btn-retry">Take Up the Vigil Again</button>
+</div>
+
+<div class="screen" id="s-win">
+  <div class="deco" style="letter-spacing:18px;color:rgba(255,235,140,.28)">✦ ✦ ✦</div>
+  <div style="font-size:12px;letter-spacing:6px;color:rgba(255,235,130,.35);margin-bottom:16px">ΔΟΞΑ ΣΟΙ Ο ΘΕΟΣ</div>
+  <div class="gt" style="font-size:38px;color:#ffe090">The Vigil is Complete</div>
+  <div class="gs" style="color:rgba(255,225,120,.32)">Glory to God in the Highest</div>
+  <div class="gl" id="win-txt" style="color:rgba(255,228,140,.48)"></div>
+  <button class="btn" style="border-color:rgba(255,215,85,.28);color:rgba(255,215,85,.72)" id="btn-again">Another Vigil</button>
+</div>
+
+<script>
+'use strict';
+// ══════════════════════════════════════════════════
+//   THE LIGHT OF TABOR · An Orthodox Hesychast Game
+//   Five canonical hours · Eight logismoi · One prayer
+// ══════════════════════════════════════════════════
+
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+let W,H,CX,CY;
+function resize(){W=canvas.width=innerWidth;H=canvas.height=innerHeight;CX=W/2;CY=H/2;}
+resize();addEventListener('resize',()=>{resize();initStars();});
+
+const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const rand=(lo,hi)=>lo+Math.random()*(hi-lo);
+
+// ── State ──────────────────────────────────
+const GS={MENU:0,WAVEINIT:1,PLAYING:2,GAMEOVER:3,VICTORY:4};
+let gs=GS.MENU,wave=1,score=0,health=100,energy=0;
+let theosisOn=false,theosisT=0;
+let waveInitT=0,spawnT=0,spawnIntvl=4;
+let logismoi=[],beams=[],parts=[];
+let enemyQ=[],waveDefeated=0,waveTotal=0;
+let rhythmPhase=0,rhythmStreak=0;
+let mx,my,lastTS=0;
+
+// ── Stars ──────────────────────────────────
+let stars=[];
+function initStars(){
+  stars=Array.from({length:105},()=>({
+    x:Math.random()*W,y:Math.random()*H*.76,
+    r:.3+Math.random()*1.4,ph:Math.random()*Math.PI*2,sp:.25+Math.random()*.9
+  }));
+}
+initStars();
+
+// ── Wave data ──────────────────────────────
+const WAVES=[
+  {name:'Vespers',sub:'The First Hour of Darkness',
+   text:'The sun sets behind Tabor. The monks gather in the church. The first stirrings of passion arise from the earth below, testing the edges of the prayer.',
+   en:[{t:'gluttony',n:3},{t:'sadness',n:2}],int:4.6},
+  {name:'Compline',sub:'The Prayer Before Sleep',
+   text:'"In peace I will lie down and sleep, for you alone, Lord, make me dwell in safety." But the night grows deeper and the logismoi multiply their number.',
+   en:[{t:'gluttony',n:2},{t:'anger',n:3},{t:'sadness',n:2}],int:3.9},
+  {name:'Nocturns',sub:'The Midnight Office',
+   text:'Midnight — the sharpest hour for watchfulness. The glittering passion of Vainglory descends from the heights, dazzling the eye with false light.',
+   en:[{t:'gluttony',n:2},{t:'anger',n:3},{t:'vainglory',n:3},{t:'sadness',n:1}],int:3.2},
+  {name:'Matins',sub:'The Pre-Dawn Vigil',
+   text:'The long vigil of Matins. Pride itself descends — the chief of all passions, mother of all delusion, ancient and vast, the darkness that calls itself light.',
+   en:[{t:'anger',n:3},{t:'vainglory',n:3},{t:'pride',n:2}],int:2.6},
+  {name:'Prime',sub:'The Dawn is at Hand',
+   text:'The first rays touch Tabor. The final assault of all the passions together. Hold the prayer. The dawn does not fail those who keep vigil to the end.',
+   en:[{t:'gluttony',n:3},{t:'anger',n:4},{t:'vainglory',n:3},{t:'pride',n:2},{t:'sadness',n:2}],int:2.1}
+];
+
+function buildQueue(wd){
+  const q=[];
+  for(const e of wd.en)for(let i=0;i<e.n;i++)q.push(e.t);
+  for(let i=q.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[q[i],q[j]]=[q[j],q[i]];}
+  return q;
+}
+
+// ── Logismos definitions ───────────────────
+const LD={
+  gluttony:{name:'Γαστριμαργία',eng:'GLUTTONY',   c1:'#6a2e0e',c2:'#8c3e18',sp:30,hp:68,sz:31},
+  anger:   {name:'Ὀργή',        eng:'ANGER',       c1:'#a81808',c2:'#d82818',sp:70,hp:40,sz:24},
+  sadness: {name:'Λύπη',        eng:'SADNESS',     c1:'#152d52',c2:'#1c3e6e',sp:38,hp:52,sz:29},
+  vainglory:{name:'Κενοδοξία',  eng:'VAINGLORY',   c1:'#7a5008',c2:'#a87010',sp:52,hp:55,sz:26},
+  pride:   {name:'Ὑπερηφανία',  eng:'PRIDE',       c1:'#220540',c2:'#320858',sp:28,hp:140,sz:48}
+};
+
+// ── Logismos ───────────────────────────────
+class Logismos{
+  constructor(type,x,y){
+    const d=LD[type];
+    Object.assign(this,{type,x,y,c1:d.c1,c2:d.c2,eng:d.eng,name:d.name,
+      sp:d.sp,hp:d.hp,maxHp:d.hp,sz:d.sz,
+      alive:true,age:0,hitFlash:0,wobSpd:rand(1.2,2.8),
+      reflected:(type==='vainglory')});
+    const dx=CX-x,dy=CY-y,dm=Math.hypot(dx,dy);
+    this.vx=(dx/dm)*d.sp;this.vy=(dy/dm)*d.sp;
+  }
+
+  update(dt){
+    this.age+=dt;
+    if(this.hitFlash>0)this.hitFlash=Math.max(0,this.hitFlash-dt*5);
+    const dx=CX-this.x,dy=CY-this.y,d=Math.hypot(dx,dy);
+    if(d<this.sz+8){
+      this.alive=false;
+      health=Math.max(0,health-18);
+      burst(this.x,this.y,this.c1,18);
+      screenShake(4);
+      if(health<=0&&gs===GS.PLAYING)endGame();
+      return;
+    }
+    const perpX=-dy/d,perpY=dx/d;
+    const wob=Math.sin(this.age*this.wobSpd)*16;
+    this.vx=lerp(this.vx,(dx/d)*this.sp+perpX*wob,dt*1.9);
+    this.vy=lerp(this.vy,(dy/d)*this.sp+perpY*wob,dt*1.9);
+    this.x+=this.vx*dt;this.y+=this.vy*dt;
+  }
+
+  takeDamage(dmg){
+    if(this.reflected){
+      this.reflected=false;
+      addBeam(this.x,this.y,CX,CY,'#a87820',true);
+      health=Math.max(0,health-7);
+      burst(CX,CY,'#a87820',8);
+      if(health<=0&&gs===GS.PLAYING)endGame();
+      return;
+    }
+    this.hp-=dmg;this.hitFlash=1;
+    if(this.hp<=0){
+      this.alive=false;score+=100+wave*22;waveDefeated++;
+      deathBurst(this.x,this.y,this.c1,this.sz);
+      if(this.type==='pride'){
+        for(let i=0;i<2;i++){
+          const a=Math.random()*Math.PI*2,r=this.sz*2;
+          logismoi.push(new Logismos(['anger','gluttony'][i],this.x+Math.cos(a)*r,this.y+Math.sin(a)*r));
+          waveTotal++;
+        }
+      }
+    }
+  }
+
+  draw(){
+    if(!this.alive)return;
+    const hf=clamp(this.hp/this.maxHp,0,1);
+    ctx.save();ctx.translate(this.x,this.y);
+
+    // Outer glow
+    const gr=ctx.createRadialGradient(0,0,0,0,0,this.sz*2.6);
+    gr.addColorStop(0,this.c2+'66');gr.addColorStop(1,'transparent');
+    ctx.fillStyle=gr;ctx.beginPath();ctx.arc(0,0,this.sz*2.6,0,Math.PI*2);ctx.fill();
+
+    ctx.rotate(Math.sin(this.age*this.wobSpd)*.12);
+    this['draw_'+this.type]();
+
+    if(this.hitFlash>0){
+      ctx.globalAlpha=this.hitFlash*.75;
+      ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(0,0,this.sz*.9,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+
+    // HP bar
+    if(hf<1){
+      const bw=this.sz*2.1;
+      ctx.fillStyle='rgba(0,0,0,.5)';ctx.fillRect(-bw/2,-this.sz-11,bw,4);
+      ctx.fillStyle=hf>.5?this.c2:'#cc3030';ctx.fillRect(-bw/2,-this.sz-11,bw*hf,4);
+    }
+    ctx.restore();
+  }
+
+  draw_gluttony(){
+    const s=this.sz;
+    ctx.fillStyle=this.c1;
+    ctx.beginPath();
+    for(let i=0;i<=12;i++){
+      const a=(i/12)*Math.PI*2;
+      const r=s*(.82+Math.sin(this.age*1.4+a*2)*.18);
+      i?ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r):ctx.moveTo(Math.cos(a)*r,Math.sin(a)*r);
+    }
+    ctx.closePath();ctx.fill();
+    ctx.fillStyle=this.c2;ctx.globalAlpha=.7;
+    ctx.beginPath();ctx.arc(0,s*.15,s*.48,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+    // Mouth
+    ctx.strokeStyle=this.c2;ctx.lineWidth=2.5;
+    ctx.beginPath();ctx.arc(0,s*.28,s*.38,0,Math.PI);ctx.stroke();
+    // Eyes
+    ctx.fillStyle='rgba(255,90,0,.75)';
+    ctx.beginPath();ctx.arc(-s*.28,-s*.22,s*.11,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(s*.28,-s*.22,s*.11,0,Math.PI*2);ctx.fill();
+  }
+
+  draw_anger(){
+    const s=this.sz;
+    ctx.fillStyle=this.c1;
+    ctx.beginPath();
+    for(let i=0;i<=14;i++){
+      const a=(i/14)*Math.PI*2;
+      const r=(i%2)?s*.42:s*(1.25+Math.sin(this.age*7+i)*.18);
+      i?ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r):ctx.moveTo(Math.cos(a)*r,Math.sin(a)*r);
+    }
+    ctx.closePath();ctx.fill();
+    ctx.fillStyle=this.c2;ctx.globalAlpha=.65;
+    ctx.beginPath();ctx.arc(0,0,s*.38,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+    ctx.fillStyle='rgba(255,210,0,.65)';
+    ctx.beginPath();ctx.arc(-s*.22,-s*.14,s*.1,0,Math.PI*2);
+    ctx.arc(s*.22,-s*.14,s*.1,0,Math.PI*2);ctx.fill();
+  }
+
+  draw_sadness(){
+    const s=this.sz;
+    ctx.fillStyle=this.c1;
+    ctx.beginPath();ctx.ellipse(0,s*.1,s*.8,s,0,0,Math.PI*2);ctx.fill();
+    for(let i=-1;i<=1;i++){
+      const len=s*(.52+Math.sin(this.age*1.3+i)*.18);
+      ctx.strokeStyle=this.c2;ctx.lineWidth=2.5;
+      ctx.beginPath();ctx.moveTo(i*s*.4,s*.75);
+      ctx.quadraticCurveTo(i*s*.4+5,s*.75+len*.5,i*s*.4,s*.75+len);ctx.stroke();
+    }
+    ctx.strokeStyle='rgba(80,130,220,.55)';ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(-s*.26,-s*.18,s*.13,0,Math.PI*2);
+    ctx.arc(s*.26,-s*.18,s*.13,0,Math.PI*2);ctx.stroke();
+  }
+
+  draw_vainglory(){
+    const s=this.sz;
+    ctx.strokeStyle=this.c1;ctx.lineWidth=1.5;
+    for(let i=0;i<8;i++){
+      const a=(i/8)*Math.PI*2+this.age*.55;
+      const len=s*1.65;
+      ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(Math.cos(a)*len,Math.sin(a)*len);ctx.stroke();
+      ctx.fillStyle=this.c2+'88';
+      ctx.beginPath();ctx.arc(Math.cos(a)*len,Math.sin(a)*len,4,0,Math.PI*2);ctx.fill();
+    }
+    ctx.fillStyle=this.c2;ctx.beginPath();ctx.arc(0,0,s*.72,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=this.c1;ctx.beginPath();ctx.arc(0,0,s*.5,0,Math.PI*2);ctx.fill();
+    if(this.reflected){
+      ctx.strokeStyle='rgba(255,255,170,.82)';ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(0,0,s*.9,0,Math.PI*2);ctx.stroke();
+    }
+  }
+
+  draw_pride(){
+    const s=this.sz;
+    const ag=ctx.createRadialGradient(0,0,0,0,0,s*2.8);
+    ag.addColorStop(0,'rgba(35,6,68,.5)');ag.addColorStop(1,'transparent');
+    ctx.fillStyle=ag;ctx.beginPath();ctx.arc(0,0,s*2.8,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=this.c1;
+    ctx.fillRect(-s,-s*.38,s*2,s*.85);
+    ctx.beginPath();
+    ctx.moveTo(-s,-s*.38);ctx.lineTo(-s*.65,-s*1.18);ctx.lineTo(-s*.33,-s*.55);
+    ctx.lineTo(0,-s*1.42);ctx.lineTo(s*.33,-s*.55);ctx.lineTo(s*.65,-s*1.18);
+    ctx.lineTo(s,-s*.38);ctx.closePath();ctx.fill();
+    ctx.fillStyle=this.c2;ctx.beginPath();ctx.arc(0,-s*.1,s*.32,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='rgba(255,28,28,.82)';
+    for(let i=-1;i<=1;i++){ctx.beginPath();ctx.arc(i*s*.52,s*.18,s*.13,0,Math.PI*2);ctx.fill();}
+  }
+}
+
+// ── Beam ────────────────────────────────────
+class Beam{
+  constructor(x1,y1,x2,y2,col,reflected){
+    Object.assign(this,{x1,y1,x2,y2,col,reflected,alpha:1,age:0,life:.22});
+  }
+  update(dt){this.age+=dt;this.alpha=Math.max(0,(1-this.age/this.life)*.88);return this.age>=this.life;}
+  draw(){
+    ctx.save();ctx.globalAlpha=this.alpha;
+    ctx.shadowBlur=20;ctx.shadowColor=this.col;
+    ctx.strokeStyle=this.col;ctx.lineWidth=6;
+    ctx.beginPath();ctx.moveTo(this.x1,this.y1);ctx.lineTo(this.x2,this.y2);ctx.stroke();
+    ctx.shadowBlur=0;ctx.strokeStyle='rgba(255,255,255,.88)';ctx.lineWidth=1.4;
+    ctx.beginPath();ctx.moveTo(this.x1,this.y1);ctx.lineTo(this.x2,this.y2);ctx.stroke();
+    ctx.restore();
+  }
+}
+function addBeam(x1,y1,x2,y2,col,ref){beams.push(new Beam(x1,y1,x2,y2,col,ref));}
+
+// ── Particle ────────────────────────────────
+class Part{
+  constructor(x,y,vx,vy,col,r,life){
+    Object.assign(this,{x,y,vx,vy,col,r,life,maxLife:life});
+  }
+  update(dt){this.x+=this.vx*dt;this.y+=this.vy*dt;this.vy+=18*dt;this.vx*=(1-dt*2.8);this.life-=dt;return this.life<=0;}
+  draw(){
+    const a=this.life/this.maxLife;
+    ctx.globalAlpha=a;ctx.fillStyle=this.col;
+    ctx.beginPath();ctx.arc(this.x,this.y,this.r*a+.3,0,Math.PI*2);ctx.fill();
+  }
+}
+function burst(x,y,col,n){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*Math.PI*2,sp=rand(28,105);
+    parts.push(new Part(x,y,Math.cos(a)*sp,Math.sin(a)*sp,col,rand(2,4.5),rand(.32,.8)));
+  }
+}
+function deathBurst(x,y,col,sz){
+  for(let i=0;i<38;i++){
+    const a=Math.random()*Math.PI*2,sp=rand(55,230);
+    const c=i%4===0?'#fff':i%3===0?'#d4a843':col;
+    parts.push(new Part(x,y,Math.cos(a)*sp,Math.sin(a)*sp-28,c,rand(3,7),rand(.6,1.45)));
+  }
+}
+
+// ── Screen shake ────────────────────────────
+let shakeAmt=0;
+function screenShake(a){shakeAmt=Math.max(shakeAmt,a);}
+
+// ── Fire prayer beam ────────────────────────
+function fire(perfect){
+  const dx=mx-CX,dy=my-CY,d=Math.hypot(dx,dy);
+  if(d<1)return;
+  const nx=dx/d,ny=dy/d;
+  let best=null,bestT=Infinity;
+  for(const l of logismoi){
+    if(!l.alive)continue;
+    const px=l.x-CX,py=l.y-CY;
+    const t=px*nx+py*ny;
+    if(t<0)continue;
+    if(Math.abs(px*ny-py*nx)<l.sz+14&&t<bestT){best=l;bestT=t;}
+  }
+  const col=perfect?'#ffe490':'#c09040';
+  const dmg=perfect?30:14;
+  if(best){
+    addBeam(CX,CY,best.x,best.y,col,false);
+    best.takeDamage(dmg);
+    burst(best.x,best.y,'#d4a843',perfect?14:6);
+  } else {
+    addBeam(CX,CY,CX+nx*600,CY+ny*600,col,false);
+  }
+  burst(CX,CY,'#d4a843',perfect?9:4);
+}
+
+// ── Theosis Burst ────────────────────────────
+function theosis(){
+  if(energy<100||gs!==GS.PLAYING)return;
+  energy=0;theosisOn=true;theosisT=0;
+  for(const l of logismoi)if(l.alive)l.takeDamage(80);
+  for(let i=0;i<8;i++){
+    const a=(i/8)*Math.PI*2;
+    addBeam(CX,CY,CX+Math.cos(a)*900,CY+Math.sin(a)*900,'#ffe490',false);
+  }
+  for(let i=0;i<90;i++){
+    const a=Math.random()*Math.PI*2,sp=rand(85,420);
+    parts.push(new Part(CX,CY,Math.cos(a)*sp,Math.sin(a)*sp,i%5===0?'#fff':'#d4a843',rand(3,8),rand(.8,2)));
+  }
+  score+=1000;screenShake(8);
+}
+
+// ── Background ───────────────────────────────
+function drawBG(t){
+  const sky=ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,'#050218');sky.addColorStop(.48,'#090428');sky.addColorStop(1,'#100640');
+  ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+
+  for(const s of stars){
+    const a=.3+Math.sin(t*s.sp+s.ph)*.22;
+    ctx.fillStyle=`rgba(252,242,208,${a})`;
+    ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();
+  }
+
+  // Mountain
+  ctx.fillStyle='#050120';
+  ctx.beginPath();ctx.moveTo(0,H);ctx.lineTo(0,H*.62);
+  ctx.quadraticCurveTo(W*.16,H*.34,W*.33,H*.53);
+  ctx.quadraticCurveTo(W*.42,H*.36,CX,H*.17);
+  ctx.quadraticCurveTo(W*.58,H*.36,W*.67,H*.53);
+  ctx.quadraticCurveTo(W*.84,H*.34,W,H*.62);
+  ctx.lineTo(W,H);ctx.closePath();ctx.fill();
+
+  // Peak ambient
+  const pg=ctx.createRadialGradient(CX,H*.17,0,CX,H*.17,130);
+  pg.addColorStop(0,'rgba(212,168,67,.07)');pg.addColorStop(1,'transparent');
+  ctx.fillStyle=pg;ctx.fillRect(0,0,W,H);
+}
+
+// ── Church ────────────────────────────────────
+function drawChurch(t){
+  const sc=Math.min(W,H)*.11;
+  ctx.save();ctx.translate(CX,CY);
+  const bw=sc*.88,bh=sc*.96;
+
+  // Shadow beneath
+  const sh=ctx.createRadialGradient(0,bh*.5,0,0,bh*.5,sc*.9);
+  sh.addColorStop(0,'rgba(0,0,0,.25)');sh.addColorStop(1,'transparent');
+  ctx.fillStyle=sh;ctx.beginPath();ctx.ellipse(0,bh*.5,sc*.9,sc*.25,0,0,Math.PI*2);ctx.fill();
+
+  // Body
+  ctx.fillStyle='#0e0824';ctx.strokeStyle='rgba(212,168,67,.45)';ctx.lineWidth=1.4;
+  ctx.fillRect(-bw/2,-bh/2,bw,bh);ctx.strokeRect(-bw/2,-bh/2,bw,bh);
+
+  // Dome
+  ctx.fillStyle='#0e0824';
+  ctx.beginPath();ctx.arc(0,-bh/2,bw*.56,Math.PI,0);ctx.fill();
+  ctx.strokeStyle='rgba(212,168,67,.38)';
+  ctx.beginPath();ctx.arc(0,-bh/2,bw*.56,Math.PI,0);ctx.stroke();
+
+  // Dome glow (health-based)
+  const hf=health/100;
+  const dg=ctx.createRadialGradient(0,-bh/2,0,0,-bh/2,bw*.52);
+  dg.addColorStop(0,`rgba(212,168,67,${.18*hf})`);dg.addColorStop(1,'transparent');
+  ctx.fillStyle=dg;ctx.beginPath();ctx.arc(0,-bh/2,bw*.56,Math.PI,0);ctx.fill();
+
+  // Orthodox cross on top
+  const ty=-bh/2-bw*.56,cs=sc*.14;
+  ctx.strokeStyle='rgba(212,168,67,.88)';ctx.lineWidth=2.2;
+  ctx.beginPath();
+  ctx.moveTo(0,ty-cs);ctx.lineTo(0,ty+cs);
+  ctx.moveTo(-cs*.68,ty-cs*.28);ctx.lineTo(cs*.68,ty-cs*.28);
+  ctx.moveTo(-cs*.52,ty+cs*.44);ctx.lineTo(cs*.52,ty+cs*.62);
+  ctx.stroke();
+
+  // Arched windows
+  const wp=.1+Math.sin(t*1.45)*.04;
+  for(let i=-1;i<=1;i+=2){
+    const wx=i*bw*.25,wy=-sc*.06;
+    ctx.fillStyle=`rgba(212,168,67,${wp})`;
+    ctx.fillRect(wx-sc*.07,wy-sc*.18,sc*.14,sc*.22);
+    ctx.beginPath();ctx.arc(wx,wy-sc*.18,sc*.07,Math.PI,0);ctx.fill();
+  }
+
+  // Door
+  ctx.fillStyle='rgba(212,168,67,.07)';
+  ctx.fillRect(-sc*.1,bh*.12,sc*.2,sc*.38);
+  ctx.beginPath();ctx.arc(0,bh*.12,sc*.1,Math.PI,0);ctx.fill();
+
+  ctx.restore();
+}
+
+// ── Prayer Aura ───────────────────────────────
+function drawAura(t){
+  const hf=health/100;
+
+  // Theosis glow
+  if(theosisOn){
+    const ta=Math.max(0,(3.5-theosisT)/3.5);
+    const tg=ctx.createRadialGradient(CX,CY,0,CX,CY,380*ta+60);
+    tg.addColorStop(0,`rgba(255,242,165,${ta*.28})`);
+    tg.addColorStop(.5,`rgba(212,168,67,${ta*.11})`);
+    tg.addColorStop(1,'transparent');
+    ctx.fillStyle=tg;ctx.beginPath();ctx.arc(CX,CY,380*ta+60,0,Math.PI*2);ctx.fill();
+    // Cross rays
+    ctx.save();ctx.translate(CX,CY);ctx.rotate(theosisT*.42);
+    for(let i=0;i<4;i++){
+      const a=(i/4)*Math.PI*2;
+      ctx.strokeStyle=`rgba(255,242,165,${ta*.48})`;ctx.lineWidth=2.8;
+      ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(Math.cos(a)*360,Math.sin(a)*360);ctx.stroke();
+      const a2=a+Math.PI/4;
+      ctx.strokeStyle=`rgba(255,242,165,${ta*.22})`;ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(Math.cos(a2)*360,Math.sin(a2)*360);ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Base aura
+  const br=75;
+  const ag=ctx.createRadialGradient(CX,CY,0,CX,CY,br*1.55);
+  ag.addColorStop(0,`rgba(212,168,67,${.12*hf})`);
+  ag.addColorStop(.65,`rgba(212,168,67,${.04*hf})`);
+  ag.addColorStop(1,'transparent');
+  ctx.fillStyle=ag;ctx.beginPath();ctx.arc(CX,CY,br*1.55,0,Math.PI*2);ctx.fill();
+
+  // THE RHYTHM RING — main click guide
+  const maxR=br+185;
+  // Ring 1 (main)
+  const r1=br+(maxR-br)*rhythmPhase;
+  const perfectWindow=rhythmPhase>.7&&rhythmPhase<.98;
+  const ringA=perfectWindow?
+    .55+(rhythmPhase-.7)/.28*.35:
+    (1-rhythmPhase)*.42;
+  const ringC=perfectWindow?
+    `rgba(255,235,100,${ringA})`:`rgba(212,168,67,${ringA})`;
+  ctx.strokeStyle=ringC;ctx.lineWidth=perfectWindow?2.5:1.8;
+  ctx.beginPath();ctx.arc(CX,CY,r1,0,Math.PI*2);ctx.stroke();
+
+  // Perfect flash at peak
+  if(rhythmPhase>.88&&rhythmPhase<.98){
+    const fa=(rhythmPhase-.88)/.1;
+    ctx.strokeStyle=`rgba(255,255,200,${fa*.7})`;ctx.lineWidth=4;
+    ctx.beginPath();ctx.arc(CX,CY,r1,0,Math.PI*2);ctx.stroke();
+  }
+
+  // Ring 2 (offset half cycle)
+  const phase2=(rhythmPhase+.5)%1;
+  const r2=br+(maxR-br)*phase2;
+  const r2a=(1-phase2)*.22;
+  ctx.strokeStyle=`rgba(212,168,67,${r2a})`;ctx.lineWidth=1;
+  ctx.beginPath();ctx.arc(CX,CY,r2,0,Math.PI*2);ctx.stroke();
+
+  // Inner static ring
+  ctx.strokeStyle=`rgba(212,168,67,${.28*hf})`;ctx.lineWidth=1.2;
+  ctx.beginPath();ctx.arc(CX,CY,br,0,Math.PI*2);ctx.stroke();
+
+  // Aim line
+  const dx=mx-CX,dy=my-CY,dm=Math.hypot(dx,dy);
+  if(dm>10){
+    const nx=dx/dm,ny=dy/dm;
+    const aLg=ctx.createLinearGradient(CX,CY,CX+nx*190,CY+ny*190);
+    aLg.addColorStop(0,`rgba(212,168,67,${.18*hf})`);aLg.addColorStop(1,'transparent');
+    ctx.strokeStyle=aLg;ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(CX,CY);ctx.lineTo(CX+nx*190,CY+ny*190);ctx.stroke();
+  }
+
+  // Nearby enemy warning glow
+  for(const l of logismoi){
+    if(!l.alive)continue;
+    const ed=Math.hypot(l.x-CX,l.y-CY);
+    if(ed<130){
+      const wa=(1-(ed-l.sz)/130)*.4;
+      ctx.strokeStyle=`rgba(200,40,40,${wa})`;ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(CX,CY,br,0,Math.PI*2);ctx.stroke();
+    }
+  }
+}
+
+// ── HUD ────────────────────────────────────
+function drawHUD(t){
+  // Byzantine border
+  const bd=20;
+  ctx.strokeStyle='rgba(212,168,67,.16)';ctx.lineWidth=1;
+  ctx.strokeRect(bd,bd,W-bd*2,H-bd*2);
+  ctx.strokeStyle='rgba(212,168,67,.06)';
+  ctx.strokeRect(bd+5,bd+5,W-bd*2-10,H-bd*2-10);
+  // Corner ornaments
+  for(const[cx2,cy2]of[[bd,bd],[W-bd,bd],[bd,H-bd],[W-bd,H-bd]]){
+    const ds=14;
+    ctx.strokeStyle='rgba(212,168,67,.26)';ctx.lineWidth=1;
+    ctx.beginPath();
+    ctx.moveTo(cx2,cy2-ds);ctx.lineTo(cx2+ds,cy2);
+    ctx.lineTo(cx2,cy2+ds);ctx.lineTo(cx2-ds,cy2);ctx.closePath();ctx.stroke();
+  }
+
+  const wd=WAVES[wave-1];
+  // Wave info
+  ctx.fillStyle='rgba(212,168,67,.42)';ctx.font='11px Georgia';ctx.textAlign='left';
+  ctx.fillText(wd.name.toUpperCase()+' · HOUR '+wave+' OF 5',36,42);
+  ctx.fillStyle='rgba(212,168,67,.22)';ctx.font='10px Georgia';
+  ctx.fillText(waveDefeated+' / '+waveTotal+' passions repelled',36,57);
+  // Score
+  ctx.fillStyle='rgba(212,168,67,.46)';ctx.font='13px Georgia';ctx.textAlign='right';
+  ctx.fillText(String(score).padStart(7,'0'),W-36,42);
+  ctx.fillStyle='rgba(212,168,67,.2)';ctx.font='9px Georgia';
+  ctx.fillText('SCORE',W-36,56);
+
+  // Health bar
+  const bw=188,bx=CX-bw/2,by=H-38,hf=health/100;
+  const hc=hf>.6?'rgba(212,168,67,.8)':hf>.32?'rgba(218,115,38,.82)':'rgba(195,38,38,.85)';
+  ctx.fillStyle='rgba(0,0,0,.35)';ctx.fillRect(bx,by,bw,6);
+  ctx.fillStyle=hc;ctx.fillRect(bx,by,bw*hf,6);
+  ctx.strokeStyle='rgba(212,168,67,.2)';ctx.lineWidth=1;ctx.strokeRect(bx,by,bw,6);
+  ctx.fillStyle='rgba(212,168,67,.32)';ctx.font='9px Georgia';ctx.textAlign='center';
+  ctx.fillText('PRAYER OF THE HEART',CX,by+17);
+
+  // Energy ring
+  const ecx=W-52,ecy=H/2,er=37;
+  ctx.strokeStyle='rgba(212,168,67,.1)';ctx.lineWidth=4;
+  ctx.beginPath();ctx.arc(ecx,ecy,er,0,Math.PI*2);ctx.stroke();
+  if(energy>0){
+    const ea=(energy/100)*Math.PI*2;
+    const ec=energy>=100?'rgba(255,235,90,.92)':'rgba(212,168,67,.68)';
+    ctx.strokeStyle=ec;ctx.lineWidth=4;
+    ctx.beginPath();ctx.arc(ecx,ecy,er,-Math.PI/2,-Math.PI/2+ea);ctx.stroke();
+  }
+  ctx.fillStyle='rgba(212,168,67,.48)';ctx.font=`${er*.44}px Georgia`;
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText(Math.floor(energy),ecx,ecy);ctx.textBaseline='alphabetic';
+  ctx.fillStyle='rgba(212,168,67,.26)';ctx.font='8px Georgia';
+  ctx.fillText('THEOSIS',ecx,ecy+er+12);
+  if(energy>=100){
+    const pa=.48+Math.sin(t*5)*.42;
+    ctx.fillStyle=`rgba(255,238,100,${pa})`;ctx.font='9px Georgia';
+    ctx.fillText('[SPACE]',ecx,ecy+er+24);
+  }
+
+  // Rhythm tip (left)
+  ctx.fillStyle='rgba(212,168,67,.2)';ctx.font='9px Georgia';ctx.textAlign='left';
+  ctx.fillText('Aim · Click',36,H-60);
+  ctx.fillText('when ring glows bright',36,H-47);
+}
+
+// ── Cursor ────────────────────────────────────
+function drawCursor(){
+  const cs=9;
+  ctx.strokeStyle='rgba(212,168,67,.72)';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(mx,my-cs);ctx.lineTo(mx,my+cs);
+  ctx.moveTo(mx-cs,my);ctx.lineTo(mx+cs,my);ctx.stroke();
+  const ts=cs*.38;
+  ctx.strokeStyle='rgba(212,168,67,.38)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(mx-ts,my-cs*.55);ctx.lineTo(mx+ts,my-cs*.55);ctx.stroke();
+  ctx.fillStyle='rgba(212,168,67,.58)';
+  ctx.beginPath();ctx.arc(mx,my,2,0,Math.PI*2);ctx.fill();
+}
+
+// ── Wave system ────────────────────────────────
+function startWave(n){
+  wave=n;waveDefeated=0;logismoi=[];beams=[];parts=[];
+  const wd=WAVES[n-1];
+  enemyQ=buildQueue(wd);waveTotal=enemyQ.length;
+  spawnIntvl=wd.int;spawnT=3.2;waveInitT=0;gs=GS.WAVEINIT;
+}
+
+function checkWaveEnd(){
+  if(enemyQ.length===0&&logismoi.filter(l=>l.alive).length===0&&waveTotal>0){
+    score+=500*wave;health=Math.min(100,health+22);energy=Math.min(100,energy+30);
+    if(wave>=5){setTimeout(showVictory,1900);}
+    else{setTimeout(()=>startWave(wave+1),2300);}
+  }
+}
+
+function showVictory(){
+  if(gs===GS.GAMEOVER)return;
+  gs=GS.VICTORY;
+  document.getElementById('win-txt').textContent='The vigil is complete. All five canonical hours have been kept with prayer. '+score+' prayers were offered before the Uncreated Light of Tabor triumphed. "Lord Jesus Christ, Son of God, have mercy on me, a sinner."';
+  document.getElementById('s-win').style.display='flex';
+}
+
+// ── Wave init overlay ─────────────────────────
+function drawWaveOverlay(){
+  const fi=Math.min(1,waveInitT*1.6);
+  const fo=waveInitT>2.6?Math.max(0,1-(waveInitT-2.6)*2.8):1;
+  const alpha=fi*fo;if(alpha<.01)return;
+  ctx.save();ctx.globalAlpha=alpha*.78;
+  ctx.fillStyle='#04030d';ctx.fillRect(0,0,W,H);ctx.globalAlpha=alpha;
+  const wd=WAVES[wave-1];
+  ctx.fillStyle='rgba(212,168,67,.92)';ctx.font='italic 29px Georgia';ctx.textAlign='center';
+  ctx.fillText('The Hour of '+wd.name,CX,CY-72);
+  ctx.fillStyle='rgba(212,168,67,.48)';ctx.font='12px Georgia';
+  ctx.fillText(wd.sub,CX,CY-46);
+  // Decorative line
+  ctx.strokeStyle='rgba(212,168,67,.22)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(CX-80,CY-32);ctx.lineTo(CX+80,CY-32);ctx.stroke();
+  // Text
+  ctx.fillStyle='rgba(212,168,67,.58)';ctx.font='italic 12.5px Georgia';
+  const words=wd.text.split(' ');let line='',y=CY;
+  for(const w of words){
+    const tl=line+w+' ';
+    if(ctx.measureText(tl).width>370&&line){ctx.fillText(line,CX,y);line=w+' ';y+=22;}
+    else line=tl;
+  }
+  ctx.fillText(line,CX,y);
+  const prog=waveInitT<3.6?'Preparing the vigil…':'Beginning…';
+  ctx.fillStyle='rgba(212,168,67,.25)';ctx.font='10px Georgia';
+  ctx.fillText('✦  '+prog+'  ✦',CX,CY+85);
+  ctx.restore();
+}
+
+// ── Main loop ──────────────────────────────────
+function loop(ts){
+  requestAnimationFrame(loop);
+  const dt=Math.min((ts-lastTS)/1000,.055);lastTS=ts;
+  const t=ts/1e3;
+
+  // Shake
+  if(shakeAmt>0){
+    shakeAmt=Math.max(0,shakeAmt-dt*20);
+    ctx.save();ctx.translate(rand(-shakeAmt,shakeAmt),rand(-shakeAmt,shakeAmt));
+  }
+
+  ctx.clearRect(0,0,W,H);
+
+  if(gs===GS.MENU){drawBG(t);if(shakeAmt>0)ctx.restore();return;}
+
+  // Update
+  rhythmPhase=(rhythmPhase+.54*dt)%1;
+  if(theosisOn){theosisT+=dt;if(theosisT>3.8)theosisOn=false;}
+
+  if(gs===GS.WAVEINIT){
+    waveInitT+=dt;if(waveInitT>3.9)gs=GS.PLAYING;
+  }
+
+  if(gs===GS.PLAYING){
+    spawnT-=dt;
+    if(spawnT<=0&&enemyQ.length>0){
+      spawnT=spawnIntvl;
+      const pos=getSpawnPos();
+      logismoi.push(new Logismos(enemyQ.shift(),pos.x,pos.y));
+    }
+    for(const l of logismoi)if(l.alive)l.update(dt);
+    logismoi=logismoi.filter(l=>l.alive);
+    beams=beams.filter(b=>!b.update(dt));
+    parts=parts.filter(p=>!p.update(dt));
+    checkWaveEnd();
+  }
+
+  // Draw
+  drawBG(t);
+  drawAura(t);
+  drawChurch(t);
+  for(const b of beams)b.draw();ctx.globalAlpha=1;
+  for(const l of logismoi)l.draw();ctx.globalAlpha=1;
+  for(const p of parts)p.draw();ctx.globalAlpha=1;
+
+  if(gs===GS.PLAYING||gs===GS.WAVEINIT){drawHUD(t);drawCursor();}
+  if(gs===GS.WAVEINIT)drawWaveOverlay();
+
+  if(shakeAmt>0)ctx.restore();
+}
+
+function getSpawnPos(){
+  const m=55,s=Math.floor(Math.random()*4);
+  if(s===0)return{x:rand(m,W-m),y:-m};
+  if(s===1)return{x:W+m,y:rand(m,H-m)};
+  if(s===2)return{x:rand(m,W-m),y:H+m};
+  return{x:-m,y:rand(m,H-m)};
+}
+
+// ── Input ──────────────────────────────────────
+canvas.addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY;});
+canvas.addEventListener('touchmove',e=>{e.preventDefault();mx=e.touches[0].clientX;my=e.touches[0].clientY;},{passive:false});
+
+canvas.addEventListener('click',e=>{
+  if(gs===GS.WAVEINIT){gs=GS.PLAYING;return;}
+  if(gs!==GS.PLAYING)return;
+  const perfect=rhythmPhase>.68&&rhythmPhase<.98;
+  rhythmStreak=perfect?rhythmStreak+1:Math.max(0,rhythmStreak-1);
+  energy=Math.min(100,energy+(perfect?(3+rhythmStreak*.6):1));
+  fire(perfect);
+  if(perfect&&energy>=100)theosis();
+});
+
+canvas.addEventListener('touchstart',e=>{
+  e.preventDefault();mx=e.touches[0].clientX;my=e.touches[0].clientY;
+  canvas.dispatchEvent(new MouseEvent('click'));
+},{passive:false});
+
+document.addEventListener('keydown',e=>{
+  if(e.code==='Space'){e.preventDefault();theosis();}
+});
+
+// ── Game management ────────────────────────────
+function startGame(){
+  document.getElementById('s-menu').style.display='none';
+  document.getElementById('s-over').style.display='none';
+  document.getElementById('s-win').style.display='none';
+  health=100;energy=0;score=0;rhythmStreak=0;theosisOn=false;
+  logismoi=[];beams=[];parts=[];shakeAmt=0;mx=CX;my=CY-80;
+  startWave(1);
+}
+
+function endGame(){
+  if(gs===GS.GAMEOVER||gs===GS.VICTORY)return;
+  gs=GS.GAMEOVER;
+  document.getElementById('go-txt').textContent='The prayer flame was extinguished during the Hour of '+WAVES[wave-1].name+'. '+score+' prayers were offered before the passions overcame the vigil. "Lord Jesus Christ, Son of God, have mercy on me, a sinner."';
+  document.getElementById('s-over').style.display='flex';
+}
+
+document.getElementById('btn-start').addEventListener('click',startGame);
+document.getElementById('btn-retry').addEventListener('click',startGame);
+document.getElementById('btn-again').addEventListener('click',startGame);
+
+// Boot
+mx=innerWidth/2;my=innerHeight/2-80;
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
