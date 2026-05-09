@@ -1,6 +1,6 @@
 # Theoria Games
 
-*Fragments of worlds, preserved in code.*
+*Fragments of worlds*
 
 Theoria Games is not a traditional game collection.
 It is an archive of interactive atmospheres, symbolic spaces, forgotten structures, and experimental worlds built through software.
