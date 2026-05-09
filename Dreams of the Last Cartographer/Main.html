@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dreams of the Last Cartographer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0a12;
+            color: #d4c8a8;
+            font-family: 'Times New Roman', serif;
+            font-size: 14px;
+            overflow: hidden;
+            cursor: crosshair;
+        }
+        #canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        #minimap {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 300px;
+            height: 300px;
+            opacity: 0.85;
+            border: 1px solid #665544;
+            border-radius: 4px;
+            image-rendering: auto;
+            pointer-events: auto;
+            cursor: default;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            max-width: 400px;
+            opacity: 0.9;
+            text-shadow: 0 0 8px rgba(0,0,0,0.8);
+            line-height: 1.4;
+            z-index: 10;
+        }
+        #title {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+            letter-spacing: 2px;
+            transition: opacity 5s;
+        }
+        #instructions {
+            font-size: 12px;
+            margin-bottom: 20px;
+            opacity: 0.7;
+        }
+        #status, #lore {
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+        }
+        #lore div {
+            margin-bottom: 8px;
+            opacity: 0.8;
+            font-style: italic;
+        }
+        #status {
+            background: rgba(0,0,0,0.4);
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #665544;
+        }
+        @media (max-width: 768px) {
+            #minimap { width: 200px; height: 200px; bottom: 10px; right: 10px; }
+            #ui { left: 10px; top: 10px; font-size: 12px; }
+            #title { font-size: 20px; }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <canvas id="mapc" width="256" height="256" style="display: none;"></canvas>
+    <canvas id="minimap" width="300" height="300"></canvas>
+    <div id="ui">
+        <div id="title">Dreams of the Last Cartographer</div>
+        <div id="instructions">
+            Mouse drag to explore. SPACE: dream states. Drag on minimap to draw &amp; preserve.
+        </div>
+        <div id="status">
+            Awaiting your quill...
+        </div>
+        <div id="lore"></div>
+    </div>
+
+    <script>
+        // Core Constants
+        const WORLD_SIZE = 4096;
+        const WORLD_OFFSET = WORLD_SIZE / 2;
+        const MAP_RES = 256;
+        const WORLD_CELL_SIZE = WORLD_SIZE / MAP_RES; // 16
+        const TOTAL_MAP_CELLS = MAP_RES * MAP_RES;
+        const DECAY_INTERVAL = 10; // frames
+        const DECAY_FACTOR = 0.995;
+        const MINIMAP_SIZE = 300;
+
+        // Globals
+        let canvas, ctx, mapCanvas, mapCtx, minimapCanvas, minimapCtx;
+        let cw, ch, minLeft, minTop, minW, minH;
+        let camX = 0, camY = 0, targetCamX = 0, targetCamY = 0;
+        let zoom = 0.8, targetZoom = 0.8;
+        let dreamState = 0;
+        let mapStability = new Float32Array(TOTAL_MAP_CELLS);
+        let decayTick = 0;
+        let time = 0, prevTime = 0, startTime = performance.now() / 1000;
+        let globalStab = 0, instab = 1, mapCnt = 0;
+        let statTick = 0;
+        let mouse = { x: 0, y: 0, down: false, lastX: 0, lastY: 0 };
+        let drawing = false;
+        let audioCtx = null;
+        let drone = null;
+        let audioReady = false;
+        let titleEl = document.getElementById('title');
+        let statusEl = document.getElementById('status');
+        let loreEl = document.getElementById('lore');
+        let loreShown = new Set();
+        let stars = [];
+        let landmarks = [
+            { x: -1200, y: -800, type: 'cathedral', lore: 'The drowned bells still toll in the abyss, calling the faithful to a service long ended.' },
+            { x: 1500, y: 900, type: 'staircase', lore: 'Steps to nowhere, climbed by shadows that never tire.' },
+            { x: -500, y: 1800, type: 'observatory', lore: 'A silent eye gazes into the unraveling firmament, charting stars that fall upward.' },
+            { x: 2000, y: -1400, type: 'kingdom', lore: 'Fractured crowns litter the plains where kings bargained with the horizon.' },
+            { x: -1800, y: 600, type: 'coastline', lore: 'Shores where waves climb the sky, and islands drift like forgotten thoughts.' },
+            { x: 800, y: -2000, type: 'archive', lore: 'Shelves of crumbling tomes whisper maps of worlds that never were.' }
+        ];
+
+        // Fast hash-based noise (value noise approximation)
+        function snoise(tx, ty) {
+            let n = tx + ty * 57;
+            n = (n << 13) ^ n;
+            n = (n * (n * n * 15731 + 789221) + 1376312589) >>> 0;
+            return 1 - ((n & 0x7fffffff) / 1073741824);
+        }
+
+        function fbm(tx, ty, octs = 4, H = 0.55) {
+            let val = 0, amp = 1;
+            let fx = tx, fy = ty;
+            for (let i = 0; i < octs; i++) {
+                val += amp * snoise(fx, fy);
+                amp *= H;
+                fx *= 2;
+                fy *= 2;
+            }
+            return val * 0.5 + 0.5; // 0..1
+        }
+
+        // Terrain generation
+        function getTerrainData(wx, wy, stab, t, dream) {
+            // Dream distortion
+            let distAmp = (1 - stab) * (0.2 + dream * 0.3) * 8;
+            let nx = wx * 0.1 + t * 0.02;
+            let ny = wy * 0.1 + t * 0.02;
+            wx += (fbm(nx, ny) - 0.5) * distAmp;
+            wy += (fbm(nx + 100, ny + 100) - 0.5) * distAmp;
+
+            // Height
+            let h = (fbm(wx * 0.0025, wy * 0.0025, 6, 0.52) - 0.4) * 1.5;
+            let distH = fbm((wx + Math.sin(t * 0.05) * 500) * 0.015, (wy + Math.cos(t * 0.05) * 500) * 0.015, 5, 0.5) * 0.8 - 0.4;
+            h = h * stab + distH * (1 - stab);
+
+            // Moisture
+            let m = fbm(wx * 0.008 + 123, wy * 0.008 + 456, 4, 0.6);
+
+            return { h, m };
+        }
+
+        function terrainColor(h, m, dream, t) {
+            let r = 40, g = 35, b = 50; // base muted
+            if (h < -0.15) {
+                // Sea
+                b = 30 + m * 40;
+                g = b * 0.6;
+            } else if (h < 0) {
+                // Shallow sea
+                b = 50 + m * 30;
+                g = 40 + m * 20;
+            } else if (h < 0.25) {
+                // Beach
+                r = 90 + m * 20;
+                g = 70 + m * 10;
+                b = 40;
+            } else if (h < 0.55) {
+                // Land/forest
+                r = 50;
+                g = 60 + (m * 40);
+                b = 40;
+            } else if (h < 0.8) {
+                // Mountain
+                r = 70; g = 65; b = 60;
+            } else {
+                // Peak
+                r = 140; g = 130; b = 120;
+            }
+            // Sepia tint
+            r = r * 1.1; g *= 0.9; b *= 0.8;
+            // Dream shift
+            if (dream > 0.3) {
+                let shift = Math.sin(t * 0.1 + dream * 2) * 30 * dream;
+                b += shift;
+                if (dream > 1.5) { // Abyss invert
+                    r = 255 - r; g = 255 - g; b = 255 - b;
+                }
+            }
+            return [Math.floor(r), Math.floor(g), Math.floor(b), 255];
+        }
+
+        // Init stars
+        function initStars() {
+            for (let i = 0; i < 800; i++) {
+                stars.push({
+                    x: (Math.random() - 0.5) * WORLD_SIZE * 2,
+                    y: (Math.random() - 0.5) * WORLD_SIZE * 2,
+                    size: Math.random() * 2 + 0.5,
+                    phase: Math.random() * Math.PI * 2
+                });
+            }
+        }
+
+        // Update stability from mapCanvas
+        function updateStability() {
+            const idata = mapCtx.getImageData(0, 0, MAP_RES, MAP_RES).data;
+            for (let i = 0, j = 3; i < TOTAL_MAP_CELLS; i++, j += 4) {
+                mapStability[i] = Math.max(mapStability[i], idata[j] / 255);
+            }
+        }
+
+        // Get stability at world pos
+        function getStab(wx, wy) {
+            let mx = Math.floor((wx + WORLD_OFFSET) / WORLD_CELL_SIZE);
+            let my = Math.floor((wy + WORLD_OFFSET) / WORLD_CELL_SIZE);
+            mx = Math.max(0, Math.min(MAP_RES - 1, mx));
+            my = Math.max(0, Math.min(MAP_RES - 1, my));
+            return mapStability[mx + my * MAP_RES];
+        }
+
+        // Save/Load
+        function saveGame() {
+            const sparse = [];
+            for (let i = 0; i < TOTAL_MAP_CELLS; i++) {
+                if (mapStability[i] > 0.01) {
+                    sparse.push({ i, s: mapStability[i] });
+                }
+            }
+            const data = {
+                sparse,
+                camX: camX,
+                camY: camY,
+                zoom: zoom,
+                dreamState,
+                time: performance.now()
+            };
+            localStorage.setItem('dreams_map', JSON.stringify(data));
+        }
+
+        function loadGame() {
+            const saved = localStorage.getItem('dreams_map');
+            if (saved) {
+                try {
+                    const data = JSON.parse(saved);
+                    data.sparse.forEach(({ i, s }) => {
+                        mapStability[i] = s;
+                    });
+                    camX = data.camX || 0;
+                    camY = data.camY || 0;
+                    zoom = data.zoom || 0.8;
+                    targetCamX = camX;
+                    targetCamY = camY;
+                    targetZoom = zoom;
+                    dreamState = data.dreamState || 0;
+                } catch (e) { }
+            }
+        }
+
+        // Audio
+        async function initAudio() {
+            if (audioCtx) return;
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            // Drone
+            const osc = audioCtx.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(32, audioCtx.currentTime);
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0.03, audioCtx.currentTime);
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(80, audioCtx.currentTime);
+            osc.connect(filter);
+            filter.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            drone = { osc, gain, filter };
+            // Noise wind
+            const bufferSize = audioCtx.sampleRate * 4;
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const bufData = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                bufData[i] = (Math.random() * 2 - 1) * 0.5;
+            }
+            const noiseOsc = audioCtx.createBufferSource();
+            noiseOsc.buffer = buffer;
+            noiseOsc.loop = true;
+            const noiseGain = audioCtx.createGain();
+            noiseGain.gain.value = 0.015;
+            const noiseFilter = audioCtx.createBiquadFilter();
+            noiseFilter.type = 'lowpass';
+            noiseFilter.frequency.value = 150;
+            noiseOsc.connect(noiseFilter);
+            noiseFilter.connect(noiseGain);
+            noiseGain.connect(audioCtx.destination);
+            noiseOsc.start();
+            // LFO for drone
+            const lfo = audioCtx.createOscillator();
+            lfo.frequency.value = 0.12;
+            lfo.type = 'sine';
+            const lfoGain = audioCtx.createGain();
+            lfoGain.gain.value = 15;
+            lfo.connect(lfoGain);
+            lfoGain.connect(filter.frequency);
+            lfo.start();
+        }
+
+        function updateAudio() {
+            if (!drone) return;
+            drone.filter.frequency.value = 40 + dreamState * 20 + Math.sin(time * 0.05) * 10;
+            drone.gain.gain.value = 0.02 + instab * 0.03 + dreamState * 0.01;
+        }
+
+        function playChime() {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(600 + dreamState * 200, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 1.5);
+            const g = audioCtx.createGain();
+            g.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.5);
+            osc.connect(g);
+            g.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 1.5);
+        }
+
+        // Check lore
+        function checkLore(wx, wy) {
+            landmarks.forEach(lm => {
+                const dx = lm.x - (wx || camX);
+                const dy = lm.y - (wy || camY);
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 400 && getStab(lm.x, lm.y) > 0.3 && !loreShown.has(lm.lore)) {
+                    loreShown.add(lm.lore);
+                    const div = document.createElement('div');
+                    div.textContent = lm.lore;
+                    loreEl.appendChild(div);
+                    loreEl.scrollTop = loreEl.scrollHeight;
+                }
+            });
+        }
+
+        // Draw landmark
+        function drawLandmark(lmx, lmy, type, dream) {
+            const sx = (lmx - camX) * zoom + cw / 2;
+            const sy = (lmy - camY) * zoom + ch / 2;
+            if (sx < -100 || sx > cw + 100 || sy < -100 || sy > ch + 100) return;
+            ctx.save();
+            ctx.translate(sx, sy);
+            ctx.scale(zoom * 0.8, zoom * 0.8);
+            ctx.strokeStyle = dream > 0.5 ? `rgba(170,170,255,0.6)` : '#665544';
+            ctx.lineWidth = 1.2;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.globalAlpha = 0.9;
+            ctx.shadowColor = dream > 1 ? '#44aaff' : '#000';
+            ctx.shadowBlur = 4 * dream;
+            ctx.beginPath();
+            switch (type) {
+                case 'cathedral':
+                    ctx.fillStyle = '#334455';
+                    ctx.fillRect(-18, -70, 36, 70);
+                    ctx.strokeStyle = '#223344';
+                    ctx.lineWidth = 2.5;
+                    // Spires
+                    ctx.moveTo(-12, -70); ctx.lineTo(-22, -110); ctx.lineTo(-2, -110); ctx.lineTo(-12, -70);
+                    ctx.moveTo(0, -70); ctx.lineTo(-10, -105); ctx.lineTo(10, -105); ctx.lineTo(0, -70);
+                    ctx.moveTo(12, -70); ctx.lineTo(22, -110); ctx.lineTo(2, -110); ctx.lineTo(12, -70);
+                    ctx.stroke();
+                    // Arches
+                    ctx.strokeStyle = '#445566';
+                    ctx.lineWidth = 1;
+                    ctx.moveTo(-15, -30); ctx.quadraticCurveTo(-18, -10, -15, 10); ctx.lineTo(15, 10);
+                    ctx.quadraticCurveTo(18, -10, 15, -30);
+                    ctx.stroke();
+                    break;
+                case 'staircase':
+                    ctx.strokeStyle = '#554433';
+                    for (let i = 0; i < 12; i++) {
+                        let yy = i * 6 - 60;
+                        ctx.moveTo(-25 + i * 1.5, yy); ctx.lineTo(25 - i * 1.5, yy + 6);
+                    }
+                    ctx.stroke();
+                    break;
+                case 'observatory':
+                    ctx.fillStyle = '#445566';
+                    ctx.beginPath();
+                    ctx.arc(0, -20, 25, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.strokeStyle = '#556677';
+                    ctx.lineWidth = 2;
+                    ctx.moveTo(0, -45); ctx.lineTo(0, 20);
+                    ctx.moveTo(-18, 10); ctx.lineTo(18, 10);
+                    ctx.stroke();
+                    break;
+                case 'kingdom':
+                    ctx.strokeStyle = '#665544';
+                    // Broken towers
+                    ctx.moveTo(-30, 50); ctx.lineTo(-30, -50); ctx.lineTo(-20, -50); ctx.lineTo(-20, -40);
+                    ctx.moveTo(-10, 40); ctx.lineTo(-10, -60); ctx.lineTo(0, -60); ctx.lineTo(0, 20);
+                    ctx.moveTo(15, 30); ctx.lineTo(15, -30); ctx.lineTo(25, -30); ctx.lineTo(25, -20);
+                    ctx.moveTo(10, 0); ctx.lineTo(-35, 0);
+                    ctx.stroke();
+                    break;
+                case 'coastline':
+                    ctx.lineWidth = 2.5;
+                    ctx.strokeStyle = '#446688';
+                    ctx.moveTo(-40, 0); ctx.quadraticCurveTo(-20, 80, 0, 20);
+                    ctx.quadraticCurveTo(20, -60, 40, -10);
+                    ctx.stroke();
+                    break;
+                case 'archive':
+                    ctx.strokeStyle = '#554466';
+                    for (let i = -3; i <= 3; i++) {
+                        ctx.moveTo(i * 10 - 35, -40); ctx.lineTo(i * 10 - 35, 60);
+                    }
+                    ctx.stroke();
+                    break;
+            }
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // Main render
+        function render() {
+            // Transform for world
+            const viewLeft = (0 - cw / 2) / zoom + camX;
+            const viewTop = (0 - ch / 2) / zoom + camY;
+            const viewRight = (cw - cw / 2) / zoom + camX;
+            const viewBottom = (ch - ch / 2) / zoom + camY;
+
+            ctx.save();
+            ctx.scale(zoom, zoom);
+            ctx.translate(-camX + cw / (2 * zoom), -camY + ch / (2 * zoom));
+
+            // Background void/sky
+            const grad = ctx.createLinearGradient(0, viewTop, 0, viewBottom);
+            grad.addColorStop(0, '#0f0f22');
+            grad.addColorStop(0.5 + dreamState * 0.2, '#1a1a33');
+            grad.addColorStop(1, '#0d0d1a');
+            ctx.fillStyle = grad;
+            ctx.fillRect(viewLeft - 100, viewTop - 100, viewRight - viewLeft + 200, viewBottom - viewTop + 200);
+
+            // Stars
+            const starAlpha = (dreamState > 0 ? 0.4 + dreamState * 0.3 : 0.1) * (0.5 + 0.5 * Math.sin(time * 0.7));
+            stars.forEach(star => {
+                const sx = (star.x - camX) * zoom + cw / 2;
+                const sy = (star.y - camY) * zoom + ch / 2;
+                if (sx > -20 && sx < cw + 20 && sy > -20 && sy < ch + 20) {
+                    ctx.save();
+                    ctx.translate(sx, sy);
+                    ctx.globalAlpha = starAlpha * (0.5 + 0.5 * Math.sin(time * 3 + star.phase));
+                    ctx.fillStyle = '#ffeedd';
+                    ctx.fillRect(-star.size / 2, -star.size / 2, star.size, star.size);
+                    ctx.restore();
+                }
+            });
+
+            // Terrain
+            const idata = ctx.createImageData(cw, ch);
+            const data = idata.data;
+            for (let py = 0; py < ch; py++) {
+                for (let px = 0; px < cw; px++) {
+                    const wx = (px - cw / 2) / zoom + camX;
+                    const wy = (py - ch / 2) / zoom + camY;
+                    const mx = Math.floor((wx + WORLD_OFFSET) / WORLD_CELL_SIZE);
+                    const my = Math.floor((wy + WORLD_OFFSET) / WORLD_CELL_SIZE);
+                    const mi = Math.max(0, Math.min(MAP_RES - 1, mx + Math.max(0, Math.min(MAP_RES - 1, my)) * MAP_RES));
+                    const stab = mapStability[mi];
+                    const { h, m } = getTerrainData(wx, wy, stab, time, dreamState);
+                    const clr = terrainColor(h, m, dreamState, time);
+                    const ii = 4 * (py * cw + px);
+                    data[ii] = clr[0];
+                    data[ii + 1] = clr[1];
+                    data[ii + 2] = clr[2];
+                    data[ii + 3] = clr[3];
+                }
+            }
+            ctx.resetTransform();
+            ctx.putImageData(idata, 0, 0);
+
+            // Fog
+            const fogR = Math.min(cw, ch) / zoom * 0.6;
+            const fogGrad = ctx.createRadialGradient(cw / 2, ch / 2, 0, cw / 2, ch / 2, fogR);
+            fogGrad.addColorStop(0, 'rgba(255,255,255,0.05)');
+            fogGrad.addColorStop(0.3, 'rgba(100,100,150,0.1 * ' + dreamState + ')');
+            fogGrad.addColorStop(1, 'rgba(5,5,15,0.7)');
+            ctx.fillStyle = fogGrad;
+            ctx.fillRect(0, 0, cw, ch);
+
+            // Map overlay (ink)
+            const mapSx = (cw / 2) + (-WORLD_OFFSET - camX) * zoom;
+            const mapSy = (ch / 2) + (-WORLD_OFFSET - camY) * zoom;
+            const mapSw = WORLD_SIZE * zoom;
+            const mapSh = WORLD_SIZE * zoom;
+            ctx.globalAlpha = 0.25 + dreamState * 0.15;
+            ctx.drawImage(mapCanvas, mapSx, mapSy, mapSw, mapSh);
+
+            ctx.restore();
+
+            // Landmarks
+            landmarks.forEach(lm => {
+                const stab = getStab(lm.x, lm.y);
+                if (stab > 0.1 || dreamState > 1) {
+                    drawLandmark(lm.x, lm.y, lm.type, dreamState);
+                }
+            });
+
+            // Minimap
+            minimapCtx.globalAlpha = 1;
+            minimapCtx.fillStyle = '#0f0f22';
+            minimapCtx.fillRect(0, 0, minW, minH);
+            minimapCtx.drawImage(mapCanvas, 0, 0, MAP_RES, MAP_RES, 0, 0, minW, minH);
+            // Cam view rect
+            const camMapCx = (camX + WORLD_OFFSET) / WORLD_CELL_SIZE;
+            const camMapCy = (camY + WORLD_OFFSET) / WORLD_CELL_SIZE;
+            const viewMapSpan = (Math.min(cw, ch) / zoom) / WORLD_CELL_SIZE;
+            const camMapLx = camMapCx - viewMapSpan / 2;
+            const camMapTy = camMapCy - viewMapSpan / 2;
+            const camMapRx = camMapCx + viewMapSpan / 2;
+            const camMapBy = camMapCy + viewMapSpan / 2;
+            minimapCtx.strokeStyle = dreamState ? '#aaffff' : '#ccaa88';
+            minimapCtx.lineWidth = 2;
+            minimapCtx.strokeRect(
+                Math.max(0, camMapLx * minW / MAP_RES),
+                Math.max(0, camMapTy * minH / MAP_RES),
+                Math.min(minW, (camMapRx - camMapLx) * minW / MAP_RES),
+                Math.min(minH, (camMapBy - camMapTy) * minH / MAP_RES)
+            );
+        }
+
+        // Update loop
+        function update(dt) {
+            decayTick++;
+            if (decayTick >= DECAY_INTERVAL) {
+                for (let i = 0; i < TOTAL_MAP_CELLS; i++) {
+                    if (mapStability[i] > 0) mapStability[i] *= DECAY_FACTOR;
+                }
+                decayTick = 0;
+            }
+
+            // Camera lerp
+            camX += (targetCamX - camX) * (0.12 + dreamState * 0.05);
+            camY += (targetCamY - camY) * (0.12 + dreamState * 0.05);
+            zoom += (targetZoom - zoom) * 0.15;
+
+            // Shake & drift
+            camX += Math.sin(time * 11.37) * instab * 1.5;
+            camY += Math.cos(time * 9.73) * instab * 1.2;
+            targetCamX += Math.sin(time * 0.23 + camY * 0.0008) * dreamState * 0.3;
+
+            // Stats
+            statTick++;
+            if (statTick >= 60) {
+                let sum = 0, cnt = 0;
+                for (let i = 0; i < TOTAL_MAP_CELLS; i++) {
+                    if (mapStability[i] > 0) {
+                        sum += mapStability[i];
+                        cnt++;
+                    }
+                }
+                globalStab = cnt ? sum / cnt : 0;
+                instab = 1 - globalStab;
+                mapCnt = cnt;
+                statTick = 0;
+            }
+
+            // Check lore near cam
+            checkLore();
+
+            updateAudio();
+
+            // UI
+            const states = ['Awake', 'Dreaming', 'Abyss'];
+            statusEl.innerHTML = `
+                Dream State: <strong>${states[dreamState]}</strong><br>
+                Global Stability: <strong>${(globalStab * 100).toFixed(1)}%</strong><br>
+                Instability: <strong>${(instab * 100).toFixed(1)}%</strong><br>
+                Mapped Regions: <strong>${mapCnt}</strong><br>
+                ${audioReady ? '' : 'Click/Space to awaken ambient echoes...'}
+            `;
+        }
+
+        // Event handlers
+        function resize() {
+            cw = canvas.width = window.innerWidth;
+            ch = canvas.height = window.innerHeight;
+            minW = minimapCanvas.width = MINIMAP_SIZE;
+            minH = minimapCanvas.height = MINIMAP_SIZE;
+            minimapCanvas.style.left = (cw - MINIMAP_SIZE - 20) + 'px';
+            minimapCanvas.style.bottom = '20px';
+            minLeft = parseFloat(minimapCanvas.style.left);
+            minTop = window.innerHeight - MINIMAP_SIZE - 20;
+        }
+
+        function isInMinimap(mx, my) {
+            return mx >= minLeft && mx <= minLeft + minW && my >= minTop && my <= minTop + minH;
+        }
+
+        // Mouse
+        canvas.addEventListener('mousedown', (e) => {
+            mouse.down = true;
+            mouse.lastX = e.clientX;
+            mouse.lastY = e.clientY;
+            initAudioIfNeeded();
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            mouse.x = e.clientX;
+            mouse.y = e.clientY;
+            const dx = e.clientX - mouse.lastX;
+            const dy = e.clientY - mouse.lastY;
+            if (mouse.down && !isInMinimap(mouse.x, mouse.y)) {
+                targetCamX -= dx / zoom;
+                targetCamY -= dy / zoom;
+            }
+            if (isInMinimap(mouse.x, mouse.y)) {
+                const mx = (mouse.x - minLeft) / minW * MAP_RES;
+                const my = (mouse.y - minTop) / minH * MAP_RES;
+                mapCtx.strokeStyle = `rgba(160, 120, 80, ${0.8 + dreamState * 0.2})`;
+                mapCtx.lineWidth = 2 + dreamState;
+                mapCtx.lineCap = 'round';
+                mapCtx.lineJoin = 'round';
+                mapCtx.shadowColor = '#000';
+                mapCtx.shadowBlur = 1;
+                if (mouse.down && !drawing) {
+                    drawing = true;
+                    mapCtx.beginPath();
+                    mapCtx.moveTo(mx, my);
+                }
+                if (drawing) {
+                    mapCtx.lineTo(mx, my);
+                    mapCtx.stroke();
+                    mapCtx.globalCompositeOperation = 'multiply';
+                }
+            } else if (drawing && mouse.down) {
+                drawing = false;
+                updateStability();
+            }
+            mouse.lastX = e.clientX;
+            mouse.lastY = e.clientY;
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            mouse.down = false;
+            if (drawing) {
+                drawing = false;
+                updateStability();
+            }
+        });
+
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const dz = e.deltaY * -0.001;
+            targetZoom *= Math.exp(dz);
+            targetZoom = Math.max(0.1, Math.min(10, targetZoom));
+            initAudioIfNeeded();
+        });
+
+        function initAudioIfNeeded() {
+            if (!audioReady) {
+                audioReady = true;
+                audioCtx?.resume();
+                initAudio();
+                statusEl.innerHTML += '<br>Reality stirs...';
+            }
+        }
+
+        // Keyboard
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                dreamState = (dreamState + 1) % 3;
+                playChime();
+                e.preventDefault();
+            }
+            initAudioIfNeeded();
+        });
+
+        // Init
+        function init() {
+            canvas = document.getElementById('canvas');
+            ctx = canvas.getContext('2d');
+            mapCanvas = document.getElementById('mapc');
+            mapCtx = mapCanvas.getContext('2d');
+            minimapCanvas = document.getElementById('minimap');
+            minimapCtx = minimapCanvas.getContext('2d');
+            ctx.imageSmoothingEnabled = true;
+            mapCtx.imageSmoothingEnabled = true;
+            minimapCtx.imageSmoothingEnabled = true;
+
+            initStars();
+            loadGame();
+            resize();
+            window.addEventListener('resize', resize);
+
+            // Title fade
+            setTimeout(() => { titleEl.style.opacity = '0'; }, 8000);
+
+            // Save interval
+            setInterval(saveGame, 20000);
+            window.addEventListener('beforeunload', saveGame);
+
+            // Loop
+            function loop(now) {
+                time = (now / 1000) - startTime;
+                const dt = time - prevTime;
+                prevTime = time;
+                update(dt);
+                render();
+                requestAnimationFrame(loop);
+            }
+            requestAnimationFrame(loop);
+        }
+
+        // Start
+        init();
+    </script>
+</body>
+</html>
