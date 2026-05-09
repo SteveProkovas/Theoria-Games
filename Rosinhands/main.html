@@ -1,0 +1,1602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rosinhands</title>
+    <style>
+        :root {
+            --bg: #1a1410;
+            --text: #d4c5b9;
+            --gold: #c8a45c;
+            --amber: #e8a840;
+            --crimson: #8b3a3a;
+            --shadow: #0d0a07;
+            --string-e: #e8d5c4;
+            --string-a: #d4b896;
+            --string-d: #b8956e;
+            --string-g: #8b6e4e;
+            --soundscape-glow: #f0c860;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0d0a07;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            font-family: 'Georgia', 'Times New Roman', serif;
+            user-select: none;
+            -webkit-user-select: none;
+            cursor: none;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            max-width: 1200px;
+            max-height: 800px;
+            overflow: hidden;
+            border: 1px solid #2a1f14;
+            box-shadow: 0 0 80px rgba(0, 0, 0, 0.7), inset 0 0 120px rgba(0, 0, 0, 0.5);
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            pointer-events: none;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            z-index: 10;
+        }
+
+        #score-display {
+            color: #c8a45c;
+            font-size: 1.4em;
+            letter-spacing: 0.05em;
+            text-shadow: 0 0 20px rgba(200, 164, 92, 0.5);
+            transition: all 0.3s;
+        }
+        #score-display.glow {
+            text-shadow: 0 0 40px rgba(240, 200, 96, 0.9), 0 0 80px rgba(200, 164, 92, 0.6);
+            color: #f0c860;
+        }
+
+        #combo-display {
+            color: #e8a840;
+            font-size: 1em;
+            letter-spacing: 0.08em;
+            opacity: 0.8;
+            transition: all 0.2s;
+        }
+        #combo-display.active {
+            opacity: 1;
+            font-size: 1.3em;
+            text-shadow: 0 0 30px rgba(232, 168, 64, 0.7);
+        }
+
+        #resonance-bar-container {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 200px;
+            height: 4px;
+            background: #2a1f14;
+            border-radius: 2px;
+            pointer-events: none;
+            z-index: 10;
+        }
+        #resonance-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #8b5e3c, #c8a45c, #f0c860);
+            border-radius: 2px;
+            transition: width 0.3s;
+            box-shadow: 0 0 15px rgba(200, 164, 92, 0.5);
+        }
+        #resonance-label {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #c8a45c;
+            font-size: 0.7em;
+            letter-spacing: 0.1em;
+            pointer-events: none;
+            z-index: 10;
+            opacity: 0.7;
+        }
+
+        #journal-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(10, 7, 4, 0.92);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 50;
+            pointer-events: all;
+            cursor: pointer;
+        }
+        #journal-overlay.visible {
+            display: flex;
+        }
+        #journal-content {
+            max-width: 500px;
+            padding: 40px;
+            color: #d4c5b9;
+            text-align: center;
+            line-height: 1.8;
+            font-size: 1.1em;
+            border: 1px solid #3a2a18;
+            background: rgba(20, 14, 8, 0.9);
+            box-shadow: 0 0 60px rgba(0, 0, 0, 0.8);
+            position: relative;
+        }
+        #journal-content h2 {
+            color: #c8a45c;
+            margin-bottom: 20px;
+            font-weight: normal;
+            letter-spacing: 0.05em;
+        }
+        #journal-content .date {
+            color: #8b6e4e;
+            font-size: 0.8em;
+            margin-bottom: 15px;
+            letter-spacing: 0.1em;
+        }
+        #journal-content .hint {
+            color: #6b5a44;
+            font-size: 0.7em;
+            margin-top: 25px;
+            letter-spacing: 0.08em;
+        }
+        #journal-content .fragment-icon {
+            font-size: 2em;
+            margin-bottom: 10px;
+            animation: float 2s ease-in-out infinite;
+        }
+        @keyframes float {
+            0%,
+            100% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(-10px);
+            }
+        }
+
+        #title-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 40;
+            pointer-events: all;
+            cursor: pointer;
+            background: rgba(10, 7, 4, 0.7);
+        }
+        #title-overlay h1 {
+            font-size: 3.5em;
+            color: #c8a45c;
+            letter-spacing: 0.08em;
+            font-weight: normal;
+            text-shadow: 0 0 60px rgba(200, 164, 92, 0.6);
+            margin-bottom: 5px;
+        }
+        #title-overlay .subtitle {
+            color: #8b6e4e;
+            letter-spacing: 0.15em;
+            font-size: 0.9em;
+            margin-bottom: 40px;
+        }
+        #title-overlay .start-hint {
+            color: #6b5a44;
+            letter-spacing: 0.1em;
+            font-size: 0.8em;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%,
+            100% {
+                opacity: 0.5;
+            }
+            50% {
+                opacity: 1;
+            }
+        }
+
+        #message-popup {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            color: #f0c860;
+            font-size: 1.5em;
+            letter-spacing: 0.05em;
+            pointer-events: none;
+            z-index: 20;
+            transition: transform 0.15s ease-out;
+            text-shadow: 0 0 30px rgba(240, 200, 96, 0.8);
+        }
+        #message-popup.show {
+            transform: translate(-50%, -50%) scale(1);
+        }
+        #message-popup.show-pop {
+            transform: translate(-50%, -50%) scale(1.3);
+            transition: transform 0.1s ease-out;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+        <div id="ui-overlay">
+            <div>
+                <div id="score-display">♫ 0</div>
+                <div id="combo-display"></div>
+            </div>
+            <div id="memory-count" style="color:#c8a45c;font-size:0.9em;opacity:0.7;"></div>
+        </div>
+        <div id="resonance-label">RESONANCE</div>
+        <div id="resonance-bar-container">
+            <div id="resonance-bar-fill" style="width:0%;"></div>
+        </div>
+        <div id="message-popup"></div>
+        <div id="journal-overlay">
+            <div id="journal-content">
+                <div class="fragment-icon">✦</div>
+                <h2 id="journal-title"></h2>
+                <div class="date" id="journal-date"></div>
+                <p id="journal-text"></p>
+                <div class="hint">click anywhere to continue</div>
+            </div>
+        </div>
+        <div id="title-overlay">
+            <h1>Rosinhands</h1>
+            <div class="subtitle">a story of strings & second chances</div>
+            <div class="start-hint">click to begin</div>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            // ──────────────────────────────────────
+            // DOM ELEMENTS
+            // ──────────────────────────────────────
+            const canvas = document.getElementById('gameCanvas');
+            const ctx = canvas.getContext('2d');
+            const container = document.getElementById('game-container');
+            const scoreDisplay = document.getElementById('score-display');
+            const comboDisplay = document.getElementById('combo-display');
+            const resonanceFill = document.getElementById('resonance-bar-fill');
+            const resonanceLabel = document.getElementById('resonance-label');
+            const messagePopup = document.getElementById('message-popup');
+            const journalOverlay = document.getElementById('journal-overlay');
+            const journalTitle = document.getElementById('journal-title');
+            const journalDate = document.getElementById('journal-date');
+            const journalText = document.getElementById('journal-text');
+            const titleOverlay = document.getElementById('title-overlay');
+            const memoryCountDisplay = document.getElementById('memory-count');
+
+            // ──────────────────────────────────────
+            // CANVAS SETUP
+            // ──────────────────────────────────────
+            let W, H;
+
+            function resize() {
+                const rect = container.getBoundingClientRect();
+                W = rect.width;
+                H = rect.height;
+                canvas.width = W * (window.devicePixelRatio || 1);
+                canvas.height = H * (window.devicePixelRatio || 1);
+                canvas.style.width = W + 'px';
+                canvas.style.height = H + 'px';
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+            }
+            window.addEventListener('resize', resize);
+            resize();
+
+            // ──────────────────────────────────────
+            // AUDIO ENGINE
+            // ──────────────────────────────────────
+            let audioCtx = null;
+
+            function initAudio() {
+                if (!audioCtx) {
+                    audioCtx = new(window.AudioContext || window.webkitAudioContext)();
+                }
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+            }
+
+            const stringFreqs = [659.25, 440.0, 293.66, 196.0]; // E, A, D, G
+            const stringNames = ['E', 'A', 'D', 'G'];
+            const stringColors = ['#e8d5c4', '#d4b896', '#b8956e', '#8b6e4e'];
+
+            function playNote(stringIndex, quality) {
+                if (!audioCtx) return;
+                const now = audioCtx.currentTime;
+                const freq = stringFreqs[stringIndex];
+
+                // Main tone
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(freq, now);
+
+                // Detune for richness
+                const osc2 = audioCtx.createOscillator();
+                const gain2 = audioCtx.createGain();
+                osc2.type = 'sine';
+                osc2.frequency.setValueAtTime(freq * 2, now);
+                gain2.gain.setValueAtTime(0.03, now);
+
+                if (quality === 'perfect') {
+                    gain.gain.setValueAtTime(0.18, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
+                    gain2.gain.setValueAtTime(0.04, now);
+                    gain2.gain.exponentialRampToValueAtTime(0.001, now + 1.5);
+                } else if (quality === 'good') {
+                    gain.gain.setValueAtTime(0.12, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+                } else if (quality === 'screech') {
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(freq * 1.03, now);
+                    osc.frequency.linearRampToValueAtTime(freq * 0.95, now + 0.15);
+                    gain.gain.setValueAtTime(0.25, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+                    gain2.gain.setValueAtTime(0, now);
+                } else if (quality === 'weak') {
+                    gain.gain.setValueAtTime(0.03, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+                    gain2.gain.setValueAtTime(0.01, now);
+                }
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc2.connect(gain2);
+                gain2.connect(audioCtx.destination);
+                osc.start(now);
+                osc.stop(now + 1.5);
+                osc2.start(now);
+                osc2.stop(now + 1.5);
+            }
+
+            function playScreechBurst() {
+                if (!audioCtx) return;
+                const now = audioCtx.currentTime;
+                const bufferSize = Math.floor(audioCtx.sampleRate * 0.2);
+                const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.3));
+                }
+                const source = audioCtx.createBufferSource();
+                source.buffer = buffer;
+                const gain = audioCtx.createGain();
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+                source.connect(gain);
+                gain.connect(audioCtx.destination);
+                source.start(now);
+            }
+
+            function playFragmentCollect() {
+                if (!audioCtx) return;
+                const now = audioCtx.currentTime;
+                const notes = [523.25, 659.25, 783.99, 1046.5];
+                notes.forEach((freq, i) => {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(freq, now + i * 0.08);
+                    gain.gain.setValueAtTime(0.1, now + i * 0.08);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.6);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(now + i * 0.08);
+                    osc.stop(now + i * 0.08 + 0.6);
+                });
+            }
+
+            // ──────────────────────────────────────
+            // GAME STATE
+            // ──────────────────────────────────────
+            const STATE = { TITLE: 'title', PRACTICE: 'practice', SOUNDSCAPE: 'soundscape', JOURNAL: 'journal' };
+            let gameState = STATE.TITLE;
+            let score = 0;
+            let combo = 0;
+            let maxCombo = 0;
+            let resonance = 0; // 0-100, builds toward Soundscape
+            const RESONANCE_THRESHOLD = 70; // Enter Soundscape at 70+
+            const RESONANCE_DECAY_RATE = 0.4;
+            const RESONANCE_PERFECT_GAIN = 8;
+            const RESONANCE_GOOD_GAIN = 4;
+            const RESONANCE_MISS_PENALTY = 12;
+            let innerCriticSize = 25; // 0-100
+            let memoryFragmentsCollected = 0;
+            let totalNotesHit = 0;
+            let totalNotesMissed = 0;
+            let sessionStartTime = 0;
+            let practiceCounts = [0, 0, 0, 0]; // per-string practice for muscle memory
+
+            // ──────────────────────────────────────
+            // NOTES SYSTEM
+            // ──────────────────────────────────────
+            const PLAYING_ZONE_X_RATIO = 0.22; // Where the playing zone is (fraction of width)
+            const NOTE_SPEED = 0.28; // Pixels per ms at reference resolution
+            const PERFECT_WINDOW = 35; // ms
+            const GOOD_WINDOW = 80; // ms
+            const OK_WINDOW = 140; // ms
+            const LANE_HEIGHT_RATIO = 0.17; // Each lane is 17% of height
+            const LANE_START_Y_RATIO = 0.16; // First lane starts at 16% from top
+            const PRESSURE_SWEET_SPOT = 0.35; // Central 35% of lane is sweet spot
+
+            let notes = [];
+            let noteSpawnTimer = 0;
+            let noteSpawnInterval = 650; // ms between notes
+            let currentDifficulty = 1;
+
+            function getLaneY(laneIndex) {
+                const laneH = H * LANE_HEIGHT_RATIO;
+                const startY = H * LANE_START_Y_RATIO;
+                return startY + laneIndex * laneH;
+            }
+
+            function getLaneCenterY(laneIndex) {
+                return getLaneY(laneIndex) + (H * LANE_HEIGHT_RATIO) / 2;
+            }
+
+            function getPlayingZoneX() {
+                return W * PLAYING_ZONE_X_RATIO;
+            }
+
+            function getStringFromMouse(mouseY) {
+                for (let i = 0; i < 4; i++) {
+                    const laneTop = getLaneY(i);
+                    const laneBottom = laneTop + H * LANE_HEIGHT_RATIO;
+                    if (mouseY >= laneTop && mouseY < laneBottom) return i;
+                }
+                return -1;
+            }
+
+            function getPressureQuality(mouseY, stringIndex) {
+                const laneCenter = getLaneCenterY(stringIndex);
+                const laneH = H * LANE_HEIGHT_RATIO;
+                const sweetHalf = (laneH * PRESSURE_SWEET_SPOT) / 2;
+                const distFromCenter = Math.abs(mouseY - laneCenter);
+                if (distFromCenter < sweetHalf * 0.5) return 'perfect';
+                if (distFromCenter < sweetHalf) return 'good';
+                if (distFromCenter < sweetHalf * 1.8) return 'weak';
+                return 'screech';
+            }
+
+            function spawnNote() {
+                const stringIndex = Math.floor(Math.random() * 4);
+                // Favor adjacent strings for musical feel
+                const weightedIndex = (() => {
+                    const r = Math.random();
+                    if (notes.length > 0) {
+                        const lastString = notes[notes.length - 1].stringIndex;
+                        if (r < 0.45) return lastString; // Same string
+                        if (r < 0.7) return Math.max(0, Math.min(3, lastString + (Math.random() < 0.5 ? -1 :
+                            1))); // Adjacent
+                    }
+                    return Math.floor(Math.random() * 4);
+                })();
+
+                const note = {
+                    stringIndex: weightedIndex,
+                    x: W + 40,
+                    y: getLaneCenterY(weightedIndex),
+                    laneY: getLaneY(weightedIndex),
+                    laneH: H * LANE_HEIGHT_RATIO,
+                    active: true,
+                    hit: false,
+                    missed: false,
+                    id: Date.now() + Math.random(),
+                    // Muscle memory bonus: practiced strings get slightly wider timing windows
+                    bonusWindow: Math.min(practiceCounts[weightedIndex] * 3, 25),
+                };
+                notes.push(note);
+            }
+
+            // ──────────────────────────────────────
+            // MEMORY FRAGMENTS
+            // ──────────────────────────────────────
+            let memoryFragments = [];
+            let fragmentSpawnTimer = 0;
+            const FRAGMENT_SPAWN_INTERVAL = 8000; // Spawn in Soundscape every ~8 seconds
+
+            function spawnMemoryFragment() {
+                if (gameState !== STATE.SOUNDSCAPE) return;
+                const frag = {
+                    x: W * 0.5 + Math.random() * W * 0.45,
+                    y: H * 0.1 + Math.random() * H * 0.8,
+                    radius: 12 + Math.random() * 8,
+                    glow: 0,
+                    glowDir: 1,
+                    collected: false,
+                    life: 6000 + Math.random() * 4000,
+                    spawnTime: performance.now(),
+                };
+                memoryFragments.push(frag);
+            }
+
+            // ──────────────────────────────────────
+            // PARTICLES
+            // ──────────────────────────────────────
+            let particles = [];
+
+            function spawnParticles(x, y, count, color, spread, life) {
+                for (let i = 0; i < count; i++) {
+                    particles.push({
+                        x,
+                        y,
+                        vx: (Math.random() - 0.5) * spread,
+                        vy: (Math.random() - 0.5) * spread - Math.random() * 3,
+                        life,
+                        maxLife: life,
+                        color,
+                        radius: 1 + Math.random() * 2.5,
+                    });
+                }
+            }
+
+            function spawnRosinParticles(x, y) {
+                for (let i = 0; i < 4; i++) {
+                    particles.push({
+                        x: x + (Math.random() - 0.5) * 20,
+                        y: y + (Math.random() - 0.5) * 8,
+                        vx: (Math.random() - 0.5) * 1.5,
+                        vy: -Math.random() * 4 - 1,
+                        life: 400 + Math.random() * 300,
+                        maxLife: 700,
+                        color: '#f5e6d3',
+                        radius: 0.5 + Math.random() * 1.5,
+                        isRosin: true,
+                    });
+                }
+            }
+
+            // ──────────────────────────────────────
+            // JOURNAL ENTRIES (Elsa's story)
+            // ──────────────────────────────────────
+            const journalEntries = [
+                { title: 'First Touch', date: 'Berlin, October 1937',
+                    text: 'Papa brought home the Mittenwald today. The varnish still soft, smelling of pine and amber. He said, "Elsa, this violin will carry your voice when words fail." I ran my fingers over the strings and felt them hum, even in silence. I promised myself I would never let it gather dust.' },
+                { title: 'The Last Concert', date: 'Vienna, March 1944',
+                    text: 'The hall was half-empty, but those who came listened with their whole souls. I played the Bach Chaconne and felt the notes become a prayer. Outside, the world was crumbling, but inside that music, we were infinite. I saw Mama crying in the third row. I knew then we had to leave.' },
+                { title: 'The Crossing', date: 'Somewhere at Sea, June 1946',
+                    text: 'The violin case stayed in my lap the entire voyage. A woman asked if I would play something to calm the children. I played a lullaby my grandmother taught me. For one hour, the fear lifted. Music is not entertainment, I realized. It is a raft.' },
+                { title: 'New Soil', date: 'New York, September 1947',
+                    text: 'I played in a small church today. The acoustics were humble but honest. Afterward, a man named George Halverson introduced himself. He said my playing reminded him of autumn in a place he could not name. I think I blushed. The violin giggled under my chin.' },
+                { title: 'Small Hands', date: 'Spring 1985',
+                    text: 'Little Marcus came to visit today. He stared at the violin case with such wonder—the same look I must have had at his age. He asked, "Grandma, will you teach me?" I said, "When you are ready, my dear." His hands are still so small. There is time. There is always time.' },
+                { title: 'Unplayed Melody', date: 'Autumn 1990',
+                    text: 'Marcus started soccer this year. And then piano, briefly. And then debate club. I watch him grow and I am so proud, but sometimes I catch myself staring at the violin case in the corner. The lessons I promised... I will find the right moment. The violin is patient. It has waited decades. It can wait a little longer.' },
+                { title: 'The Final Note', date: 'Winter 2001',
+                    text: 'My hands are not what they were. The arthritis makes vibrato difficult, but I still play every morning—just a few scales, a fragment of melody. The violin understands. It has grown old with me. Marcus called today. He is an accountant now. So serious! I wish he could hear the music I still hear in my dreams. Perhaps one day he will find the violin and understand. All the words I never said are folded inside its wood.' },
+            ];
+            let unlockedJournals = [];
+            let currentJournalIndex = -1;
+            let journalUnlockThresholds = [1, 2, 3, 5, 7, 9, 11]; // Memory fragments needed
+
+            function unlockNextJournal() {
+                for (let i = 0; i < journalUnlockThresholds.length; i++) {
+                    if (!unlockedJournals.includes(i) && memoryFragmentsCollected >= journalUnlockThresholds[i]) {
+                        unlockedJournals.push(i);
+                        return i;
+                    }
+                }
+                return -1;
+            }
+
+            function showJournal(index) {
+                if (index < 0 || index >= journalEntries.length) return;
+                currentJournalIndex = index;
+                const entry = journalEntries[index];
+                journalTitle.textContent = entry.title;
+                journalDate.textContent = entry.date;
+                journalText.textContent = entry.text;
+                journalOverlay.classList.add('visible');
+                gameState = STATE.JOURNAL;
+            }
+
+            function hideJournal() {
+                journalOverlay.classList.remove('visible');
+                gameState = resonance >= RESONANCE_THRESHOLD ? STATE.SOUNDSCAPE : STATE.PRACTICE;
+                currentJournalIndex = -1;
+            }
+
+            // ──────────────────────────────────────
+            // MOUSE TRACKING
+            // ──────────────────────────────────────
+            let mouseX = W / 2;
+            let mouseY = H / 2;
+            let mouseOnCanvas = false;
+            let mouseTrail = [];
+            const MAX_TRAIL = 16;
+
+            canvas.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                mouseX = e.clientX - rect.left;
+                mouseY = e.clientY - rect.top;
+                mouseOnCanvas = true;
+                mouseTrail.push({ x: mouseX, y: mouseY, time: performance.now() });
+                if (mouseTrail.length > MAX_TRAIL) mouseTrail.shift();
+            });
+            canvas.addEventListener('mouseleave', () => { mouseOnCanvas = false;
+                mouseTrail = []; });
+            canvas.addEventListener('mouseenter', (e) => {
+                mouseOnCanvas = true;
+                const rect = canvas.getBoundingClientRect();
+                mouseX = e.clientX - rect.left;
+                mouseY = e.clientY - rect.top;
+            });
+
+            // ──────────────────────────────────────
+            // CLICK HANDLING
+            // ──────────────────────────────────────
+            function handleClick(e) {
+                initAudio();
+                if (gameState === STATE.TITLE) {
+                    startGame();
+                    return;
+                }
+                if (gameState === STATE.JOURNAL) {
+                    hideJournal();
+                    return;
+                }
+            }
+            canvas.addEventListener('click', handleClick);
+            journalOverlay.addEventListener('click', (e) => {
+                e.stopPropagation();
+                hideJournal();
+            });
+            titleOverlay.addEventListener('click', (e) => {
+                e.stopPropagation();
+                initAudio();
+                startGame();
+            });
+
+            function startGame() {
+                gameState = STATE.PRACTICE;
+                score = 0;
+                combo = 0;
+                maxCombo = 0;
+                resonance = 15;
+                innerCriticSize = 25;
+                memoryFragmentsCollected = 0;
+                totalNotesHit = 0;
+                totalNotesMissed = 0;
+                notes = [];
+                memoryFragments = [];
+                particles = [];
+                unlockedJournals = [];
+                practiceCounts = [0, 0, 0, 0];
+                sessionStartTime = performance.now();
+                noteSpawnTimer = 0;
+                fragmentSpawnTimer = 0;
+                currentDifficulty = 1;
+                noteSpawnInterval = 650;
+                titleOverlay.style.display = 'none';
+                updateUI();
+            }
+
+            // ──────────────────────────────────────
+            // GAME LOOP
+            // ──────────────────────────────────────
+            let lastTime = performance.now();
+            let popupTimer = 0;
+            let popupText = '';
+            let shakeAmount = 0;
+            let soundscapeTransition = 0; // 0-1 for visual blending
+
+            function update(dt) {
+                if (gameState === STATE.TITLE || gameState === STATE.JOURNAL) return;
+
+                const realDt = Math.min(dt, 50); // Cap to avoid jumps
+
+                // Update resonance
+                if (gameState === STATE.PRACTICE || gameState === STATE.SOUNDSCAPE) {
+                    resonance -= RESONANCE_DECAY_RATE * (realDt / 1000);
+                    resonance = Math.max(0, Math.min(100, resonance));
+                }
+
+                // Soundscape transition
+                const targetTransition = resonance >= RESONANCE_THRESHOLD ? 1 : 0;
+                soundscapeTransition += (targetTransition - soundscapeTransition) * 0.04;
+                if (Math.abs(soundscapeTransition - targetTransition) < 0.005) soundscapeTransition = targetTransition;
+
+                // Update game state based on resonance
+                if (resonance >= RESONANCE_THRESHOLD && gameState === STATE.PRACTICE) {
+                    gameState = STATE.SOUNDSCAPE;
+                    spawnParticles(W / 2, H / 2, 40, '#f0c860', 8, 2000);
+                    showPopup('🎻 Soundscape');
+                } else if (resonance < RESONANCE_THRESHOLD - 15 && gameState === STATE.SOUNDSCAPE) {
+                    gameState = STATE.PRACTICE;
+                    memoryFragments = [];
+                    showPopup('return...');
+                }
+
+                // Inner Critic adaptation
+                const targetCritic = Math.max(5, Math.min(95,
+                    25 + (totalNotesMissed * 3) - (totalNotesHit * 1.5) + (100 - resonance) * 0.3
+                ));
+                innerCriticSize += (targetCritic - innerCriticSize) * 0.02;
+
+                // Difficulty scaling
+                if (totalNotesHit + totalNotesMissed > 30 && (totalNotesHit / Math.max(1, totalNotesHit +
+                        totalNotesMissed)) > 0.7) {
+                    currentDifficulty = Math.min(3, 1 + Math.floor((totalNotesHit + totalNotesMissed) / 60));
+                    noteSpawnInterval = Math.max(350, 650 - (currentDifficulty - 1) * 100);
+                }
+
+                // Spawn notes
+                noteSpawnTimer += realDt;
+                if (noteSpawnTimer >= noteSpawnInterval) {
+                    noteSpawnTimer -= noteSpawnInterval;
+                    spawnNote();
+                    if (currentDifficulty >= 2 && Math.random() < 0.3) {
+                        setTimeout(() => { if (gameState !== STATE.TITLE && gameState !== STATE.JOURNAL) spawnNote(); },
+                            150);
+                    }
+                }
+
+                // Move notes
+                const playingZoneX = getPlayingZoneX();
+                for (const note of notes) {
+                    note.x -= NOTE_SPEED * realDt;
+                    // Check if note passed the playing zone
+                    if (!note.hit && !note.missed && note.x < playingZoneX - 50) {
+                        note.missed = true;
+                        handleMiss(note);
+                    }
+                    // Remove far-off-screen notes
+                    if (note.x < -80) note.active = false;
+                }
+                notes = notes.filter(n => n.active);
+
+                // Check for hits
+                if (mouseOnCanvas && notes.length > 0) {
+                    const stringIdx = getStringFromMouse(mouseY);
+                    if (stringIdx >= 0) {
+                        const pressureQuality = getPressureQuality(mouseY, stringIdx);
+                        for (const note of notes) {
+                            if (note.hit || note.missed || note.stringIndex !== stringIdx) continue;
+                            const distToZone = Math.abs(note.x - playingZoneX);
+                            const timeDist = distToZone / NOTE_SPEED;
+                            const totalWindow = OK_WINDOW + note.bonusWindow;
+                            if (timeDist < totalWindow) {
+                                // Hit!
+                                note.hit = true;
+                                const absTimeDist = Math.abs(timeDist);
+                                const perfWindow = PERFECT_WINDOW + note.bonusWindow;
+                                const goodWindow = GOOD_WINDOW + note.bonusWindow;
+                                let timing;
+                                if (absTimeDist < perfWindow) timing = 'perfect';
+                                else if (absTimeDist < goodWindow) timing = 'good';
+                                else timing = 'ok';
+
+                                handleHit(note, timing, pressureQuality);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Update memory fragments
+                fragmentSpawnTimer += realDt;
+                if (gameState === STATE.SOUNDSCAPE && fragmentSpawnTimer >= FRAGMENT_SPAWN_INTERVAL) {
+                    fragmentSpawnTimer -= FRAGMENT_SPAWN_INTERVAL;
+                    spawnMemoryFragment();
+                }
+                // Check fragment collection
+                if (mouseOnCanvas) {
+                    for (const frag of memoryFragments) {
+                        if (frag.collected) continue;
+                        const dx = mouseX - frag.x;
+                        const dy = mouseY - frag.y;
+                        if (Math.sqrt(dx * dx + dy * dy) < frag.radius + 20) {
+                            frag.collected = true;
+                            memoryFragmentsCollected++;
+                            playFragmentCollect();
+                            spawnParticles(frag.x, frag.y, 25, '#f0c860', 6, 1500);
+                            showPopup('✨ Memory Fragment!');
+                            const newJournal = unlockNextJournal();
+                            if (newJournal >= 0) {
+                                setTimeout(() => showJournal(newJournal), 1200);
+                            }
+                        }
+                    }
+                }
+                memoryFragments = memoryFragments.filter(f => !f.collected && performance.now() - f.spawnTime < f.life);
+
+                // Update particles
+                for (const p of particles) {
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.life -= realDt;
+                    if (p.isRosin) p.vy -= 0.01;
+                }
+                particles = particles.filter(p => p.life > 0);
+
+                // Update popup
+                if (popupTimer > 0) {
+                    popupTimer -= realDt;
+                    if (popupTimer <= 0) {
+                        messagePopup.classList.remove('show', 'show-pop');
+                        popupText = '';
+                    }
+                }
+
+                // Shake decay
+                shakeAmount *= 0.85;
+                if (shakeAmount < 0.1) shakeAmount = 0;
+
+                // Clean mouse trail
+                const now = performance.now();
+                mouseTrail = mouseTrail.filter(t => now - t.time < 200);
+
+                updateUI();
+            }
+
+            function handleHit(note, timing, pressureQuality) {
+                totalNotesHit++;
+                practiceCounts[note.stringIndex]++;
+                combo++;
+                if (combo > maxCombo) maxCombo = combo;
+
+                let points = 0;
+                let resonanceGain = 0;
+                const combinedQuality = timing === 'perfect' && pressureQuality === 'perfect' ? 'perfect' :
+                    timing === 'perfect' || pressureQuality === 'perfect' ? 'good' :
+                    pressureQuality === 'screech' ? 'screech' :
+                    pressureQuality === 'weak' ? 'weak' : 'good';
+
+                switch (combinedQuality) {
+                    case 'perfect':
+                        points = 300 + combo * 10;
+                        resonanceGain = RESONANCE_PERFECT_GAIN;
+                        playNote(note.stringIndex, 'perfect');
+                        spawnParticles(note.x, note.y, 14, '#f0c860', 5, 800);
+                        spawnRosinParticles(note.x, note.y);
+                        if (combo > 5) showPopup('Perfect!');
+                        break;
+                    case 'good':
+                        points = 150 + combo * 5;
+                        resonanceGain = RESONANCE_GOOD_GAIN;
+                        playNote(note.stringIndex, 'good');
+                        spawnParticles(note.x, note.y, 8, '#c8a45c', 3, 500);
+                        spawnRosinParticles(note.x, note.y);
+                        break;
+                    case 'screech':
+                        points = 20;
+                        resonanceGain = 1;
+                        playScreechBurst();
+                        spawnParticles(note.x, note.y, 6, '#ff4444', 4, 400);
+                        shakeAmount = Math.max(shakeAmount, 4);
+                        combo = Math.max(0, combo - 2);
+                        break;
+                    case 'weak':
+                        points = 40;
+                        resonanceGain = 2;
+                        playNote(note.stringIndex, 'weak');
+                        spawnParticles(note.x, note.y, 3, '#8888cc', 2, 300);
+                        combo = Math.max(0, combo - 1);
+                        break;
+                    default:
+                        points = 100;
+                        resonanceGain = RESONANCE_GOOD_GAIN;
+                        playNote(note.stringIndex, 'good');
+                }
+
+                score += points;
+                resonance = Math.min(100, resonance + resonanceGain);
+            }
+
+            function handleMiss(note) {
+                totalNotesMissed++;
+                combo = 0;
+                resonance = Math.max(0, resonance - RESONANCE_MISS_PENALTY);
+                innerCriticSize = Math.min(95, innerCriticSize + 4);
+                spawnParticles(note.x, note.y, 5, '#444', 2, 500);
+            }
+
+            function showPopup(text) {
+                popupText = text;
+                popupTimer = 1000;
+                messagePopup.textContent = text;
+                messagePopup.classList.add('show');
+                messagePopup.classList.remove('show-pop');
+                void messagePopup.offsetWidth;
+                messagePopup.classList.add('show-pop');
+                setTimeout(() => {
+                    if (popupTimer <= 0) messagePopup.classList.remove('show-pop');
+                }, 150);
+            }
+
+            function updateUI() {
+                scoreDisplay.textContent = '♫ ' + Math.floor(score);
+                if (combo >= 8) scoreDisplay.classList.add('glow');
+                else scoreDisplay.classList.remove('glow');
+
+                if (combo >= 5) {
+                    comboDisplay.textContent = combo + 'x combo';
+                    comboDisplay.classList.add('active');
+                } else if (combo >= 2) {
+                    comboDisplay.textContent = combo + 'x';
+                    comboDisplay.classList.remove('active');
+                } else {
+                    comboDisplay.textContent = '';
+                    comboDisplay.classList.remove('active');
+                }
+                resonanceFill.style.width = resonance + '%';
+                if (resonance >= RESONANCE_THRESHOLD) {
+                    resonanceFill.style.boxShadow = '0 0 25px rgba(240,200,96,0.8)';
+                    resonanceLabel.style.color = '#f0c860';
+                } else {
+                    resonanceFill.style.boxShadow = '0 0 15px rgba(200,164,92,0.5)';
+                    resonanceLabel.style.color = '#c8a45c';
+                }
+                memoryCountDisplay.textContent = memoryFragmentsCollected > 0 ? '✦ ' + memoryFragmentsCollected +
+                    ' memories' : '';
+            }
+
+            // ──────────────────────────────────────
+            // RENDERING
+            // ──────────────────────────────────────
+            function drawBackground() {
+                // Base dark background
+                const bgGrad = ctx.createRadialGradient(W / 2, H / 2, W * 0.3, W / 2, H / 2, W * 1.2);
+                const isSoundscape = soundscapeTransition > 0.01;
+                if (isSoundscape) {
+                    const r1 = lerp(26, 40, soundscapeTransition);
+                    const g1 = lerp(20, 30, soundscapeTransition);
+                    const b1 = lerp(16, 50, soundscapeTransition);
+                    const r2 = lerp(13, 20, soundscapeTransition);
+                    const g2 = lerp(7, 15, soundscapeTransition);
+                    const b2 = lerp(4, 25, soundscapeTransition);
+                    bgGrad.addColorStop(0, `rgb(${r1},${g1},${b1})`);
+                    bgGrad.addColorStop(1, `rgb(${r2},${g2},${b2})`);
+                } else {
+                    bgGrad.addColorStop(0, '#1a1410');
+                    bgGrad.addColorStop(1, '#0d0704');
+                }
+                ctx.fillStyle = bgGrad;
+                ctx.fillRect(0, 0, W, H);
+
+                // Subtle vignette
+                const vignetteGrad = ctx.createRadialGradient(W / 2, H / 2, W * 0.55, W / 2, H / 2, W * 0.9);
+                vignetteGrad.addColorStop(0, 'transparent');
+                vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.55)');
+                ctx.fillStyle = vignetteGrad;
+                ctx.fillRect(0, 0, W, H);
+
+                // Soundscape flowing waves
+                if (soundscapeTransition > 0.01) {
+                    ctx.globalAlpha = soundscapeTransition * 0.25;
+                    const time = performance.now() / 1000;
+                    for (let wave = 0; wave < 5; wave++) {
+                        ctx.beginPath();
+                        const waveY = H * 0.3 + wave * H * 0.12;
+                        for (let x = 0; x < W; x += 3) {
+                            const y = waveY + Math.sin(x * 0.008 + time * 0.7 + wave * 1.5) * 35 +
+                                Math.cos(x * 0.015 - time * 0.5) * 20;
+                            if (x === 0) ctx.moveTo(x, y);
+                            else ctx.lineTo(x, y);
+                        }
+                        ctx.strokeStyle = `hsla(${38 + wave * 10}, 60%, 55%, ${0.3 + wave * 0.1})`;
+                        ctx.lineWidth = 1.5 + wave * 0.5;
+                        ctx.stroke();
+                    }
+                    ctx.globalAlpha = 1;
+                }
+            }
+
+            function drawAmbientParticles() {
+                const time = performance.now() / 1000;
+                // Floating dust motes (always present, enhanced in Soundscape)
+                const moteCount = Math.floor(15 + soundscapeTransition * 25);
+                for (let i = 0; i < moteCount; i++) {
+                    const seed = i * 137.508;
+                    const x = (Math.sin(seed + time * 0.3) * 0.5 + 0.5) * W;
+                    const y = (Math.cos(seed * 1.3 + time * 0.25) * 0.5 + 0.5) * H;
+                    const alpha = 0.15 + Math.sin(time * 1.5 + seed) * 0.1 + soundscapeTransition * 0.3;
+                    const size = 0.8 + soundscapeTransition * 2;
+                    const hue = lerp(35, 42, soundscapeTransition);
+                    ctx.fillStyle = `hsla(${hue}, 40%, 70%, ${alpha})`;
+                    ctx.beginPath();
+                    ctx.arc(x, y, size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            function drawInnerCritic() {
+                const size = innerCriticSize;
+                const criticX = W * 0.85;
+                const criticY = H * 0.45;
+                const height = 80 + size * 2.5;
+                const width = 30 + size * 0.7;
+
+                // Shadow figure
+                ctx.save();
+                const breathe = Math.sin(performance.now() / 2000) * 3;
+                const alpha = 0.3 + (size / 100) * 0.55;
+
+                // Body shadow
+                const bodyGrad = ctx.createLinearGradient(criticX, criticY - height / 2, criticX, criticY + height / 2);
+                bodyGrad.addColorStop(0, `rgba(20,10,30,${alpha})`);
+                bodyGrad.addColorStop(0.5, `rgba(40,15,30,${alpha})`);
+                bodyGrad.addColorStop(1, `rgba(10,5,15,${alpha * 0.6})`);
+                ctx.fillStyle = bodyGrad;
+
+                // Tall thin figure
+                ctx.beginPath();
+                ctx.ellipse(criticX, criticY + breathe, width, height / 2, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Head
+                const headY = criticY - height / 2 - 12 + breathe;
+                ctx.fillStyle = `rgba(25,12,30,${alpha + 0.1})`;
+                ctx.beginPath();
+                ctx.arc(criticX, headY, width * 0.8, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Eyes - glow when critic is large
+                const eyeGlow = Math.max(0, (size - 30) / 70);
+                if (eyeGlow > 0) {
+                    const eyeY = headY - 3;
+                    for (let side = -1; side <= 1; side += 2) {
+                        const eyeX = criticX + side * width * 0.35;
+                        const glowGrad = ctx.createRadialGradient(eyeX, eyeY, 1, eyeX, eyeY, 10 + eyeGlow * 15);
+                        glowGrad.addColorStop(0, `rgba(200,180,220,${eyeGlow})`);
+                        glowGrad.addColorStop(1, 'transparent');
+                        ctx.fillStyle = glowGrad;
+                        ctx.beginPath();
+                        ctx.arc(eyeX, eyeY, 2 + eyeGlow * 3, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+                ctx.restore();
+            }
+
+            function drawStringLanes() {
+                const playingZoneX = getPlayingZoneX();
+                for (let i = 0; i < 4; i++) {
+                    const laneY = getLaneY(i);
+                    const laneH = H * LANE_HEIGHT_RATIO;
+                    const laneCenter = laneY + laneH / 2;
+                    const sweetHalf = (laneH * PRESSURE_SWEET_SPOT) / 2;
+
+                    // Lane background
+                    const laneAlpha = 0.12 + soundscapeTransition * 0.15;
+                    ctx.fillStyle = `rgba(${40 + i * 15}, ${25 + i * 10}, ${18 + i * 8}, ${laneAlpha})`;
+                    ctx.fillRect(0, laneY, W, laneH);
+
+                    // Lane dividers
+                    ctx.strokeStyle = `rgba(${stringColors[i]}, 0.25)`;
+                    ctx.lineWidth = 0.5;
+                    ctx.beginPath();
+                    ctx.moveTo(0, laneY);
+                    ctx.lineTo(W, laneY);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(0, laneY + laneH);
+                    ctx.lineTo(W, laneY + laneH);
+                    ctx.stroke();
+
+                    // String line (center of lane)
+                    const stringGlow = soundscapeTransition > 0.5 ? soundscapeTransition * 0.5 : 0;
+                    ctx.strokeStyle = `rgba(${stringColors[i]}, ${0.4 + stringGlow})`;
+                    ctx.lineWidth = 1 + stringGlow;
+                    ctx.setLineDash([8, 20]);
+                    ctx.beginPath();
+                    ctx.moveTo(0, laneCenter);
+                    ctx.lineTo(W, laneCenter);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    // Sweet spot indicator
+                    const sweetGrad = ctx.createLinearGradient(0, laneCenter - sweetHalf, 0, laneCenter + sweetHalf);
+                    sweetGrad.addColorStop(0, 'rgba(200,164,92,0.08)');
+                    sweetGrad.addColorStop(0.5, 'rgba(200,164,92,0.2)');
+                    sweetGrad.addColorStop(1, 'rgba(200,164,92,0.08)');
+                    ctx.fillStyle = sweetGrad;
+                    ctx.fillRect(playingZoneX - 25, laneCenter - sweetHalf, 50, sweetHalf * 2);
+
+                    // Sweet spot center line
+                    ctx.strokeStyle = 'rgba(200,164,92,0.3)';
+                    ctx.lineWidth = 0.5;
+                    ctx.beginPath();
+                    ctx.moveTo(playingZoneX - 20, laneCenter);
+                    ctx.lineTo(playingZoneX + 20, laneCenter);
+                    ctx.stroke();
+
+                    // String label
+                    ctx.fillStyle = `rgba(${stringColors[i]}, 0.5)`;
+                    ctx.font = `${11 + soundscapeTransition * 2}px Georgia`;
+                    ctx.textAlign = 'right';
+                    ctx.fillText(stringNames[i], playingZoneX - 35, laneCenter + 4);
+                }
+
+                // Bottom lane border
+                const lastLaneY = getLaneY(3) + H * LANE_HEIGHT_RATIO;
+                ctx.strokeStyle = 'rgba(180,150,120,0.25)';
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.moveTo(0, lastLaneY);
+                ctx.lineTo(W, lastLaneY);
+                ctx.stroke();
+
+                // Top lane border
+                const firstLaneY = getLaneY(0);
+                ctx.beginPath();
+                ctx.moveTo(0, firstLaneY);
+                ctx.lineTo(W, firstLaneY);
+                ctx.stroke();
+            }
+
+            function drawPlayingZone() {
+                const playingZoneX = getPlayingZoneX();
+                const zoneGrad = ctx.createLinearGradient(playingZoneX - 15, 0, playingZoneX + 15, 0);
+                zoneGrad.addColorStop(0, 'rgba(200,164,92,0)');
+                zoneGrad.addColorStop(0.45, 'rgba(200,164,92,0.2)');
+                zoneGrad.addColorStop(0.5, 'rgba(240,200,96,0.35)');
+                zoneGrad.addColorStop(0.55, 'rgba(200,164,92,0.2)');
+                zoneGrad.addColorStop(1, 'rgba(200,164,92,0)');
+                ctx.fillStyle = zoneGrad;
+                ctx.fillRect(playingZoneX - 12, H * LANE_START_Y_RATIO - 10, 24, H * LANE_HEIGHT_RATIO * 4 + 20);
+
+                // Glowing center line
+                const glowAlpha = 0.35 + Math.sin(performance.now() / 800) * 0.15 + soundscapeTransition * 0.3;
+                ctx.strokeStyle = `rgba(240,200,96,${glowAlpha})`;
+                ctx.lineWidth = 1.5 + soundscapeTransition;
+                ctx.shadowColor = `rgba(240,200,96,${glowAlpha})`;
+                ctx.shadowBlur = 8 + soundscapeTransition * 12;
+                ctx.beginPath();
+                ctx.moveTo(playingZoneX, H * LANE_START_Y_RATIO - 15);
+                ctx.lineTo(playingZoneX, getLaneY(3) + H * LANE_HEIGHT_RATIO + 15);
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+            }
+
+            function drawNotes() {
+                const playingZoneX = getPlayingZoneX();
+                for (const note of notes) {
+                    if (note.hit || note.missed) continue;
+                    const laneCenter = getLaneCenterY(note.stringIndex);
+                    // Note trails toward playing zone
+                    const distToZone = note.x - playingZoneX;
+                    const urgency = Math.max(0, 1 - distToZone / 300);
+
+                    // Glow
+                    const glowGrad = ctx.createRadialGradient(note.x, laneCenter, 0, note.x, laneCenter, 16 + urgency *
+                        10);
+                    const noteColor = stringColors[note.stringIndex];
+                    glowGrad.addColorStop(0, `rgba(240,200,150,${0.7 + urgency * 0.3})`);
+                    glowGrad.addColorStop(0.5, `rgba(${noteColor},0.3)`);
+                    glowGrad.addColorStop(1, 'transparent');
+                    ctx.fillStyle = glowGrad;
+                    ctx.beginPath();
+                    ctx.arc(note.x, laneCenter, 16 + urgency * 10, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Note body
+                    const noteGrad = ctx.createRadialGradient(note.x, laneCenter, 1, note.x, laneCenter, 9);
+                    noteGrad.addColorStop(0, '#fffef8');
+                    noteGrad.addColorStop(0.6, `rgba(${noteColor},0.9)`);
+                    noteGrad.addColorStop(1, `rgba(${noteColor},0.4)`);
+                    ctx.fillStyle = noteGrad;
+                    ctx.beginPath();
+                    // Diamond shape
+                    const nx = note.x;
+                    const ny = laneCenter;
+                    const r = 8 + urgency * 3;
+                    ctx.moveTo(nx, ny - r);
+                    ctx.lineTo(nx + r * 0.7, ny);
+                    ctx.lineTo(nx, ny + r);
+                    ctx.lineTo(nx - r * 0.7, ny);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.strokeStyle = `rgba(255,255,255,${0.5 + urgency * 0.3})`;
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+
+                    // Bonus window indicator (muscle memory)
+                    if (note.bonusWindow > 2) {
+                        ctx.strokeStyle = `rgba(200,180,140,0.25)`;
+                        ctx.lineWidth = 0.8;
+                        ctx.setLineDash([3, 6]);
+                        ctx.beginPath();
+                        ctx.arc(note.x, ny, 14 + note.bonusWindow * 0.3, 0, Math.PI * 2);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                    }
+                }
+            }
+
+            function drawBowCursor() {
+                if (!mouseOnCanvas) return;
+                const stringIdx = getStringFromMouse(mouseY);
+                const playingZoneX = getPlayingZoneX();
+                const time = performance.now();
+
+                // Bow trail
+                if (mouseTrail.length > 1 && stringIdx >= 0) {
+                    ctx.strokeStyle = 'rgba(220,200,170,0.3)';
+                    ctx.lineWidth = 2;
+                    ctx.lineCap = 'round';
+                    ctx.beginPath();
+                    const now = time;
+                    for (let i = 0; i < mouseTrail.length; i++) {
+                        const t = mouseTrail[i];
+                        const alpha = 1 - (now - t.time) / 200;
+                        if (alpha <= 0) continue;
+                        if (i === 0 || (now - mouseTrail[Math.max(0, i - 1)].time) > 200) ctx.moveTo(t.x, t.y);
+                        else ctx.lineTo(t.x, t.y);
+                    }
+                    ctx.stroke();
+                }
+
+                // Bow horizontal line
+                const bowY = mouseY;
+                const bowLength = 55;
+                ctx.strokeStyle = 'rgba(240,225,200,0.8)';
+                ctx.lineWidth = 2.5;
+                ctx.lineCap = 'round';
+                ctx.shadowColor = 'rgba(240,220,180,0.5)';
+                ctx.shadowBlur = 8;
+                ctx.beginPath();
+                ctx.moveTo(mouseX - bowLength / 2, bowY);
+                ctx.lineTo(mouseX + bowLength / 2, bowY);
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+
+                // Bow hair texture
+                ctx.strokeStyle = 'rgba(255,245,230,0.35)';
+                ctx.lineWidth = 1;
+                for (let i = -3; i <= 3; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(mouseX - bowLength / 2 + 5, bowY + i * 1.2);
+                    ctx.lineTo(mouseX + bowLength / 2 - 5, bowY + i * 1.2);
+                    ctx.stroke();
+                }
+
+                // Bow grip highlight
+                const gripGrad = ctx.createRadialGradient(mouseX, bowY, 2, mouseX, bowY, 7);
+                gripGrad.addColorStop(0, 'rgba(255,255,250,0.7)');
+                gripGrad.addColorStop(1, 'transparent');
+                ctx.fillStyle = gripGrad;
+                ctx.beginPath();
+                ctx.arc(mouseX, bowY, 7, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Pressure indicator glow
+                if (stringIdx >= 0) {
+                    const pressureQuality = getPressureQuality(mouseY, stringIdx);
+                    let pColor;
+                    switch (pressureQuality) {
+                        case 'perfect':
+                            pColor = 'rgba(240,200,96,0.7)';
+                            break;
+                        case 'good':
+                            pColor = 'rgba(200,164,92,0.5)';
+                            break;
+                        case 'weak':
+                            pColor = 'rgba(130,130,200,0.5)';
+                            break;
+                        case 'screech':
+                            pColor = 'rgba(220,80,60,0.6)';
+                            break;
+                        default:
+                            pColor = 'rgba(180,150,120,0.4)';
+                    }
+                    const pGlow = ctx.createRadialGradient(mouseX, bowY, 3, mouseX, bowY, 18);
+                    pGlow.addColorStop(0, pColor);
+                    pGlow.addColorStop(1, 'transparent');
+                    ctx.fillStyle = pGlow;
+                    ctx.beginPath();
+                    ctx.arc(mouseX, bowY, 18, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Rosin sparkles on bow
+                    if (pressureQuality === 'perfect' || pressureQuality === 'good') {
+                        for (let s = 0; s < 3; s++) {
+                            const sx = mouseX + (Math.random() - 0.5) * 30;
+                            const sy = bowY + (Math.random() - 0.5) * 10;
+                            ctx.fillStyle = 'rgba(255,250,240,0.6)';
+                            ctx.beginPath();
+                            ctx.arc(sx, sy, 0.6, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                    }
+                }
+            }
+
+            function drawMemoryFragments() {
+                const time = performance.now();
+                for (const frag of memoryFragments) {
+                    if (frag.collected) continue;
+                    const pulse = 1 + Math.sin(time / 400 + frag.x) * 0.2;
+                    const r = frag.radius * pulse;
+
+                    // Outer glow
+                    const outerGlow = ctx.createRadialGradient(frag.x, frag.y, r * 0.3, frag.x, frag.y, r * 2.5);
+                    outerGlow.addColorStop(0, 'rgba(240,200,96,0.6)');
+                    outerGlow.addColorStop(0.5, 'rgba(200,150,60,0.2)');
+                    outerGlow.addColorStop(1, 'transparent');
+                    ctx.fillStyle = outerGlow;
+                    ctx.beginPath();
+                    ctx.arc(frag.x, frag.y, r * 2.5, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Core
+                    const coreGlow = ctx.createRadialGradient(frag.x, frag.y, 0, frag.x, frag.y, r);
+                    coreGlow.addColorStop(0, '#fffef0');
+                    coreGlow.addColorStop(0.4, '#f0d878');
+                    coreGlow.addColorStop(1, 'rgba(180,130,40,0.3)');
+                    ctx.fillStyle = coreGlow;
+                    ctx.beginPath();
+                    // Star-like shape
+                    const spikes = 6;
+                    for (let i = 0; i < spikes * 2; i++) {
+                        const angle = (i / (spikes * 2)) * Math.PI * 2 - Math.PI / 2;
+                        const rad = i % 2 === 0 ? r : r * 0.4;
+                        const sx = frag.x + Math.cos(angle) * rad;
+                        const sy = frag.y + Math.sin(angle) * rad;
+                        if (i === 0) ctx.moveTo(sx, sy);
+                        else ctx.lineTo(sx, sy);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
+
+                    // Sparkle rays
+                    ctx.strokeStyle = 'rgba(255,240,200,0.3)';
+                    ctx.lineWidth = 0.7;
+                    for (let i = 0; i < 8; i++) {
+                        const angle = (i / 8) * Math.PI * 2 + time / 3000;
+                        const len = r * 1.8;
+                        ctx.beginPath();
+                        ctx.moveTo(frag.x, frag.y);
+                        ctx.lineTo(frag.x + Math.cos(angle) * len, frag.y + Math.sin(angle) * len);
+                        ctx.stroke();
+                    }
+                }
+            }
+
+            function drawParticles() {
+                for (const p of particles) {
+                    const alpha = p.life / p.maxLife;
+                    ctx.fillStyle = p.color.replace(')', `,${alpha})`).replace('rgb',
+                        'rgba').replace(/rgba\(([^,]+),([^,]+),([^,]+),([^)]+)\)/, (m, r, g, b, a) =>
+                        `rgba(${r},${g},${b},${alpha * parseFloat(a || 1)})`);
+                    if (p.color.startsWith('#')) {
+                        const hex = p.color;
+                        ctx.fillStyle = hex + Math.floor(alpha * 255).toString(16).padStart(2, '0');
+                    }
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.radius * alpha, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            function drawViolinSilhouette() {
+                // Subtle violin body shape in the background
+                const vx = W * 0.08;
+                const vy = H * 0.48;
+                const vw = W * 0.13;
+                const vh = H * 0.55;
+                ctx.fillStyle = 'rgba(30,20,14,0.4)';
+                ctx.beginPath();
+                // Simplified violin body
+                ctx.ellipse(vx, vy - vh * 0.22, vw * 0.35, vh * 0.14, 0, 0, Math.PI * 2);
+                ctx.ellipse(vx, vy + vh * 0.22, vw * 0.5, vh * 0.2, 0, 0, Math.PI * 2);
+                ctx.fill();
+                // Neck
+                ctx.fillStyle = 'rgba(40,28,18,0.3)';
+                ctx.fillRect(vx - vw * 0.04, vy - vh * 0.5, vw * 0.08, vh * 0.65);
+                // Scroll
+                ctx.beginPath();
+                ctx.arc(vx, vy - vh * 0.48, vw * 0.06, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            function drawHUD() {
+                // Title at top
+                ctx.fillStyle = `rgba(200,164,92,${0.4 + soundscapeTransition * 0.3})`;
+                ctx.font = '16px Georgia';
+                ctx.textAlign = 'left';
+                ctx.fillText('ROSINHANDS', 20, 30);
+
+                // Session info
+                const sessionMinutes = Math.floor((performance.now() - sessionStartTime) / 60000);
+                ctx.fillStyle = 'rgba(180,150,120,0.35)';
+                ctx.font = '10px Georgia';
+                ctx.textAlign = 'right';
+                ctx.fillText(`session: ${sessionMinutes}m`, W - 20, 28);
+                ctx.fillText(`max combo: ${maxCombo}`, W - 20, 44);
+
+                // Soundscape indicator
+                if (soundscapeTransition > 0.5) {
+                    ctx.fillStyle = `rgba(240,200,96,${soundscapeTransition * 0.6})`;
+                    ctx.font = 'italic 13px Georgia';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('~ Soundscape ~', W / 2, H - 15);
+                }
+
+                // Memory fragment counter on HUD
+                if (memoryFragmentsCollected > 0) {
+                    ctx.fillStyle = 'rgba(240,200,96,0.6)';
+                    ctx.font = '12px Georgia';
+                    ctx.textAlign = 'right';
+                    ctx.fillText('✦'.repeat(Math.min(memoryFragmentsCollected, 10)), W - 20, 62);
+                }
+            }
+
+            function lerp(a, b, t) { return a + (b - a) * t; }
+
+            function render() {
+                ctx.clearRect(0, 0, W, H);
+
+                // Apply shake
+                let sx = 0,
+                    sy = 0;
+                if (shakeAmount > 0.2) {
+                    sx = (Math.random() - 0.5) * shakeAmount * 2;
+                    sy = (Math.random() - 0.5) * shakeAmount * 2;
+                }
+                ctx.save();
+                ctx.translate(sx, sy);
+
+                drawBackground();
+                drawViolinSilhouette();
+                drawAmbientParticles();
+                drawInnerCritic();
+                drawStringLanes();
+                drawPlayingZone();
+                drawNotes();
+                drawMemoryFragments();
+                drawParticles();
+                drawBowCursor();
+                drawHUD();
+
+                ctx.restore();
+
+                // Draw popup message (outside shake)
+                if (popupTimer > 0 && popupText) {
+                    const alpha = Math.min(1, popupTimer / 300);
+                    ctx.fillStyle = `rgba(240,200,96,${alpha})`;
+                    ctx.font = 'italic 22px Georgia';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(popupText, W / 2, H / 2 - 40);
+                }
+
+                // Title screen rendering
+                if (gameState === STATE.TITLE) {
+                    drawTitleScreen();
+                }
+            }
+
+            function drawTitleScreen() {
+                // Already handled by overlay, but add some canvas atmosphere
+                const alpha = 0.6 + Math.sin(performance.now() / 2000) * 0.2;
+                // Dust motes
+                const time = performance.now() / 1000;
+                for (let i = 0; i < 30; i++) {
+                    const seed = i * 97.3;
+                    const x = (Math.sin(seed + time * 0.2) * 0.5 + 0.5) * W;
+                    const y = (Math.cos(seed * 1.7 + time * 0.3) * 0.5 + 0.5) * H;
+                    ctx.fillStyle = `rgba(200,170,130,${0.08 + Math.sin(time + seed) * 0.04})`;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 1.2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                // Violin case silhouette center
+                const cx = W / 2;
+                const cy = H / 2;
+                ctx.fillStyle = 'rgba(30,18,10,0.5)';
+                ctx.beginPath();
+                ctx.ellipse(cx, cy - 15, 55, 85, 0.05, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = 'rgba(40,25,15,0.4)';
+                ctx.fillRect(cx - 14, cy - 100, 28, 120);
+                // Rosin dust sparkle
+                ctx.fillStyle = `rgba(240,220,180,${alpha})`;
+                ctx.beginPath();
+                ctx.arc(cx, cy - 70, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // ──────────────────────────────────────
+            // MAIN LOOP
+            // ──────────────────────────────────────
+            function gameLoop(timestamp) {
+                const dt = timestamp - lastTime;
+                lastTime = timestamp;
+
+                update(dt);
+                render();
+
+                requestAnimationFrame(gameLoop);
+            }
+
+            // ──────────────────────────────────────
+            // INITIALIZATION
+            // ──────────────────────────────────────
+            function init() {
+                resize();
+                gameState = STATE.TITLE;
+                score = 0;
+                combo = 0;
+                resonance = 0;
+                notes = [];
+                memoryFragments = [];
+                particles = [];
+                updateUI();
+                resonanceFill.style.width = '0%';
+                comboDisplay.textContent = '';
+                memoryCountDisplay.textContent = '';
+                titleOverlay.style.display = 'flex';
+                journalOverlay.classList.remove('visible');
+                lastTime = performance.now();
+                requestAnimationFrame(gameLoop);
+            }
+
+            // Handle window resize
+            window.addEventListener('resize', () => {
+                resize();
+            });
+
+            // Keyboard shortcut to skip title
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && gameState === STATE.TITLE) {
+                    initAudio();
+                    startGame();
+                }
+                if (e.key === 'Escape' && gameState === STATE.JOURNAL) {
+                    hideJournal();
+                }
+            });
+
+            init();
+            console.log('%c🎻 Rosinhands %cready.',
+                'font-size:1.4em;color:#c8a45c;', 'color:#8b6e4e;');
+            console.log('%cMove mouse to control bow. Left-right near playing zone to hit notes.',
+                'color:#d4c5b9;');
+            console.log('%cVertical position within each string lane = bow pressure.',
+                'color:#b8956e;');
+            console.log('%cBuild resonance to enter the Soundscape. Collect memory fragments.',
+                'color:#c8a45c;');
+        })();
+    </script>
+</body>
+</html>
