@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Rosinhands · A Quiet Story</title>
+    <style>
+        :root {
+            --bg: #0d0906;
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #050302;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Georgia', 'Times New Roman', serif;
+            overflow: hidden;
+            cursor: default;
+        }
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            max-width: 1100px;
+            max-height: 750px;
+            box-shadow: 0 0 100px rgba(0, 0, 0, 0.9), 0 0 0 2px #1a1108;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            image-rendering: auto;
+        }
+        #hint-bar {
+            position: absolute;
+            bottom: 18px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #b8a080;
+            font-size: 0.85em;
+            letter-spacing: 0.06em;
+            pointer-events: none;
+            text-shadow: 0 0 18px rgba(0, 0, 0, 0.9);
+            transition: opacity 0.5s;
+            text-align: center;
+            background: rgba(8, 5, 3, 0.6);
+            padding: 6px 22px;
+            border-radius: 20px;
+        }
+        #fragment-ui {
+            position: absolute;
+            top: 20px;
+            right: 26px;
+            color: #c8a45c;
+            font-size: 1em;
+            letter-spacing: 0.05em;
+            pointer-events: none;
+            text-shadow: 0 0 20px rgba(200, 164, 92, 0.5);
+        }
+        #journal-modal {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(4, 2, 1, 0.88);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 30;
+            cursor: pointer;
+            flex-direction: column;
+        }
+        #journal-modal.show {
+            display: flex;
+        }
+        #journal-card {
+            background: #18120c;
+            border: 1px solid #3a2a16;
+            max-width: 480px;
+            width: 85%;
+            padding: 36px 32px;
+            color: #d4c0a8;
+            text-align: center;
+            line-height: 1.7;
+            box-shadow: 0 0 70px rgba(0, 0, 0, 0.8);
+            border-radius: 6px;
+            position: relative;
+        }
+        #journal-card h2 {
+            color: #e8b860;
+            font-weight: normal;
+            font-size: 1.4em;
+            margin-bottom: 4px;
+            letter-spacing: 0.03em;
+        }
+        #journal-card .jdate {
+            font-size: 0.75em;
+            color: #7a6548;
+            margin-bottom: 16px;
+            letter-spacing: 0.08em;
+        }
+        #journal-card p {
+            font-size: 0.95em;
+        }
+        #journal-card .hint {
+            font-size: 0.7em;
+            color: #5a4530;
+            margin-top: 22px;
+            letter-spacing: 0.05em;
+        }
+        #journal-card .seal {
+            font-size: 2.2em;
+            margin-bottom: 6px;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <canvas id="c"></canvas>
+        <div id="hint-bar">arrow keys to move · explore the attic</div>
+        <div id="fragment-ui">✦ 0</div>
+        <div id="journal-modal">
+            <div id="journal-card">
+                <div class="seal">🕯️</div>
+                <h2 id="jtitle"></h2>
+                <div class="jdate" id="jdate"></div>
+                <p id="jtext"></p>
+                <div class="hint">click or press ENTER to close</div>
+            </div>
+        </div>
+    </div>
+    <script>
+        (function() {
+            const canvas = document.getElementById('c');
+            const ctx = canvas.getContext('2d');
+            const hintBar = document.getElementById('hint-bar');
+            const fragmentUI = document.getElementById('fragment-ui');
+            const journalModal = document.getElementById('journal-modal');
+            const jtitle = document.getElementById('jtitle');
+            const jdate = document.getElementById('jdate');
+            const jtext = document.getElementById('jtext');
+
+            let W, H;
+
+            function resize() {
+                const container = document.getElementById('container');
+                W = container.clientWidth;
+                H = container.clientHeight;
+                canvas.width = W;
+                canvas.height = H;
+            }
+            window.addEventListener('resize', resize);
+            resize();
+
+            // ──────────────────────────────────────
+            // WORLD STATE
+            // ──────────────────────────────────────
+            const WORLD = { ATTIC: 'attic', SOUNDSCAPE: 'soundscape' };
+            let world = WORLD.ATTIC;
+            let fragmentsCollected = 0;
+            let totalFragmentsInWorld = 0;
+            let maxFragments = 14;
+            let showingJournal = false;
+            let journalQueue = [];
+            let unlockedIndices = [];
+            let transitionAlpha = 0; // 0-1 for crossfade
+            let targetTransition = 0;
+
+            // ──────────────────────────────────────
+            // PLAYER (Marcus)
+            // ──────────────────────────────────────
+            let player = {
+                x: 180,
+                y: 380,
+                vx: 0,
+                vy: 0,
+                width: 18,
+                height: 38,
+                speed: 2.2,
+                facing: 1, // 1=right, -1=left
+                walkFrame: 0,
+                walkTimer: 0,
+                isMoving: false,
+            };
+
+            // ──────────────────────────────────────
+            // KEYS
+            // ──────────────────────────────────────
+            const keys = {};
+            window.addEventListener('keydown', e => {
+                keys[e.key] = true;
+                if (e.key === 'Enter' && showingJournal) closeJournal();
+                if (e.key === 'Escape' && showingJournal) closeJournal();
+                if (e.key === 'e' || e.key === 'E') tryInteract();
+                e.preventDefault();
+            });
+            window.addEventListener('keyup', e => {
+                keys[e.key] = false;
+                e.preventDefault();
+            });
+            journalModal.addEventListener('click', () => { if (showingJournal) closeJournal(); });
+            canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+            // ──────────────────────────────────────
+            // INTERACTIVE OBJECTS
+            // ──────────────────────────────────────
+            let objects = [];
+            let fragments = [];
+            let particles = [];
+            let dustMotes = [];
+            let musicalNotes = []; // floating notes in soundscape
+
+            // Attic objects
+            const violinPos = { x: 720, y: 290, w: 50, h: 70, type: 'violin', label: 'Grandma\'s Violin',
+                hint: 'press E to play' };
+            const drawerPos = { x: 430, y: 440, w: 60, h: 35, type: 'drawer', label: 'Old Drawer', hint: 'press E to open',
+                opened: false, gaveFragment: false };
+            const photoAlbumPos = { x: 120, y: 310, w: 44, h: 34, type: 'album', label: 'Photo Album', hint: 'press E to look',
+                looked: false, gaveFragment: false };
+            const musicBoxPos = { x: 550, y: 200, w: 36, h: 30, type: 'musicbox', label: 'Music Box',
+                hint: 'press E to wind', wound: false, gaveFragment: false };
+            const windowPos = { x: 880, y: 90, w: 80, h: 100, type: 'window', label: 'Rainy Window',
+                hint: 'just look...', looked: false };
+            const letterPos = { x: 310, y: 500, w: 30, h: 22, type: 'letter', label: 'Folded Letter', hint: 'press E to read',
+                read: false, gaveFragment: false };
+            const trunkPos = { x: 60, y: 520, w: 70, h: 45, type: 'trunk', label: 'Steamer Trunk', hint: 'press E to open',
+                opened: false, gaveFragment: false };
+
+            // Soundscape objects
+            const portalBack = { x: 500, y: 480, w: 50, h: 50, type: 'portal', label: 'Return Portal',
+            hint: 'press E to return' };
+            const memoryPedestal = { x: 280, y: 200, w: 40, h: 40, type: 'pedestal', label: 'Memory Pedestal',
+                hint: 'press E to resonate', used: false };
+
+            function buildObjects() {
+                if (world === WORLD.ATTIC) {
+                    objects = [violinPos, drawerPos, photoAlbumPos, musicBoxPos, windowPos, letterPos, trunkPos];
+                } else {
+                    objects = [portalBack, memoryPedestal];
+                }
+            }
+
+            function getInteractable() {
+                for (let obj of objects) {
+                    let cx = obj.x + obj.w / 2;
+                    let cy = obj.y + obj.h / 2;
+                    let pcx = player.x;
+                    let pcy = player.y - player.height / 2;
+                    let dist = Math.hypot(pcx - cx, pcy - cy);
+                    if (dist < 55) return obj;
+                }
+                return null;
+            }
+
+            function tryInteract() {
+                if (showingJournal) return;
+                let obj = getInteractable();
+                if (!obj) return;
+                handleObjectInteraction(obj);
+            }
+
+            function handleObjectInteraction(obj) {
+                switch (obj.type) {
+                    case 'violin':
+                        if (world === WORLD.ATTIC) {
+                            transitionToSoundscape();
+                        }
+                        break;
+                    case 'drawer':
+                        if (!obj.opened && world === WORLD.ATTIC) {
+                            obj.opened = true;
+                            if (!obj.gaveFragment) { obj.gaveFragment = true;
+                                spawnFragmentNear(obj); }
+                            spawnParticles(obj.x + obj.w / 2, obj.y, 15, '#c8a45c');
+                            queueMessage('You found a faded photograph...');
+                        }
+                        break;
+                    case 'album':
+                        if (!obj.looked && world === WORLD.ATTIC) {
+                            obj.looked = true;
+                            if (!obj.gaveFragment) { obj.gaveFragment = true;
+                                spawnFragmentNear(obj); }
+                            spawnParticles(obj.x + obj.w / 2, obj.y, 12, '#e8d5c4');
+                            queueMessage('Elsa with her violin, Berlin 1936.');
+                        }
+                        break;
+                    case 'musicbox':
+                        if (!obj.wound && world === WORLD.ATTIC) {
+                            obj.wound = true;
+                            if (!obj.gaveFragment) { obj.gaveFragment = true;
+                                spawnFragmentNear(obj); }
+                            spawnParticles(obj.x + obj.w / 2, obj.y, 20, '#f0c860');
+                            queueMessage('A faint melody stirs the dust...');
+                        }
+                        break;
+                    case 'window':
+                        if (!obj.looked && world === WORLD.ATTIC) {
+                            obj.looked = true;
+                            queueMessage('Rain taps gently. The world outside waits.');
+                        }
+                        break;
+                    case 'letter':
+                        if (!obj.read && world === WORLD.ATTIC) {
+                            obj.read = true;
+                            if (!obj.gaveFragment) { obj.gaveFragment = true;
+                                spawnFragmentNear(obj); }
+                            spawnParticles(obj.x + obj.w / 2, obj.y, 10, '#e8d5c4');
+                            queueMessage('"My dearest Elsa, the music never leaves..."');
+                        }
+                        break;
+                    case 'trunk':
+                        if (!obj.opened && world === WORLD.ATTIC) {
+                            obj.opened = true;
+                            if (!obj.gaveFragment) { obj.gaveFragment = true;
+                                spawnFragmentNear(obj); }
+                            spawnParticles(obj.x + obj.w / 2, obj.y, 18, '#b8956e');
+                            queueMessage('Concert programs from Vienna, 1943.');
+                        }
+                        break;
+                    case 'portal':
+                        if (world === WORLD.SOUNDSCAPE) {
+                            transitionToAttic();
+                        }
+                        break;
+                    case 'pedestal':
+                        if (!obj.used && world === WORLD.SOUNDSCAPE) {
+                            obj.used = true;
+                            spawnFragmentNear(obj);
+                            spawnParticles(obj.x + obj.w / 2, obj.y, 25, '#f0c860');
+                            queueMessage('The resonance reveals a hidden memory...');
+                        }
+                        break;
+                }
+            }
+
+            function spawnFragmentNear(obj) {
+                let fx = obj.x + obj.w / 2 + (Math.random() - 0.5) * 40;
+                let fy = obj.y + obj.h / 2 + (Math.random() - 0.5) * 30;
+                fragments.push({
+                    x: fx,
+                    y: fy,
+                    collected: false,
+                    glow: Math.random() * Math.PI * 2,
+                    world: world,
+                    size: 8 + Math.random() * 4,
+                });
+                totalFragmentsInWorld++;
+            }
+
+            function transitionToSoundscape() {
+                targetTransition = 1;
+                setTimeout(() => {
+                    world = WORLD.SOUNDSCAPE;
+                    player.x = 300;
+                    player.y = 350;
+                    fragments = fragments.filter(f => f.world === WORLD.SOUNDSCAPE || !f.collected);
+                    // ensure soundscape fragments exist
+                    if (fragments.filter(f => f.world === WORLD.SOUNDSCAPE && !f.collected).length < 5) {
+                        for (let i = 0; i < 6; i++) {
+                            fragments.push({
+                                x: 100 + Math.random() * 700,
+                                y: 80 + Math.random() * 500,
+                                collected: false,
+                                glow: Math.random() * Math.PI * 2,
+                                world: WORLD.SOUNDSCAPE,
+                                size: 8 + Math.random() * 5,
+                            });
+                            totalFragmentsInWorld++;
+                        }
+                    }
+                    buildObjects();
+                    targetTransition = 0;
+                    transitionAlpha = 0;
+                    hintBar.textContent = 'Soundscape · play the violin, find memories';
+                }, 500);
+            }
+
+            function transitionToAttic() {
+                targetTransition = 1;
+                setTimeout(() => {
+                    world = WORLD.ATTIC;
+                    player.x = violinPos.x + 20;
+                    player.y = violinPos.y + 50;
+                    fragments = fragments.filter(f => f.world === WORLD.ATTIC || !f.collected);
+                    buildObjects();
+                    targetTransition = 0;
+                    transitionAlpha = 0;
+                    hintBar.textContent = 'attic · explore & press E near objects';
+                }, 500);
+            }
+
+            function queueMessage(msg) {
+                hintBar.textContent = msg;
+                hintBar.style.opacity = '1';
+                setTimeout(() => {
+                    if (!showingJournal) {
+                        hintBar.textContent = world === WORLD.ATTIC ? 'attic · explore & press E near objects' :
+                            'Soundscape · play the violin, find memories';
+                        hintBar.style.opacity = '0.8';
+                    }
+                }, 3000);
+            }
+
+            // ──────────────────────────────────────
+            // FRAGMENTS
+            // ──────────────────────────────────────
+            function spawnInitialFragments() {
+                fragments = [];
+                totalFragmentsInWorld = 0;
+                for (let i = 0; i < 5; i++) {
+                    fragments.push({
+                        x: 80 + Math.random() * 750,
+                        y: 100 + Math.random() * 420,
+                        collected: false,
+                        glow: Math.random() * Math.PI * 2,
+                        world: WORLD.ATTIC,
+                        size: 8 + Math.random() * 4,
+                    });
+                    totalFragmentsInWorld++;
+                }
+            }
+
+            function collectFragment(frag) {
+                frag.collected = true;
+                fragmentsCollected++;
+                fragmentUI.textContent = '✦ ' + fragmentsCollected;
+                for (let i = 0; i < 16; i++) {
+                    particles.push({
+                        x: frag.x,
+                        y: frag.y,
+                        vx: (Math.random() - 0.5) * 5,
+                        vy: (Math.random() - 0.5) * 5 - 2,
+                        life: 35 + Math.random() * 25,
+                        maxLife: 60,
+                        color: '#f0c860',
+                        size: 1.5 + Math.random() * 2.5,
+                    });
+                }
+                checkJournalUnlock();
+                if (!showingJournal && journalQueue.length > 0) showNextJournal();
+            }
+
+            // ──────────────────────────────────────
+            // JOURNAL SYSTEM
+            // ──────────────────────────────────────
+            const journalEntries = [
+                { title: 'First Touch', date: 'Berlin, October 1937',
+                    text: 'Papa brought home the Mittenwald today. The varnish still soft, smelling of pine and amber. He said, "Elsa, this violin will carry your voice when words fail." I ran my fingers over the strings and felt them hum, even in silence. I promised myself I would never let it gather dust.' },
+                { title: 'The Last Concert', date: 'Vienna, March 1944',
+                    text: 'The hall was half-empty, but those who came listened with their whole souls. I played the Bach Chaconne and felt the notes become a prayer. Outside, the world was crumbling, but inside that music, we were infinite. I saw Mama crying in the third row.' },
+                { title: 'The Crossing', date: 'Somewhere at Sea, June 1946',
+                    text: 'The violin case stayed in my lap the entire voyage. A woman asked if I would play something to calm the children. I played a lullaby my grandmother taught me. For one hour, fear lifted. Music is not entertainment—it is a raft. It carries us.' },
+                { title: 'New Soil', date: 'New York, September 1947',
+                    text: 'I played in a small church today. The acoustics were humble but honest. Afterward, a man named George Halverson introduced himself. He said my playing reminded him of autumn in a place he could not name. I think I blushed. The violin giggled under my chin.' },
+                { title: 'Small Hands', date: 'Spring 1985',
+                    text: 'Little Marcus came to visit today. He stared at the violin case with such wonder—the same look I must have had at his age. He asked, "Grandma, will you teach me?" I said, "When you are ready, my dear." His hands are still so small. There is time. There is always time.' },
+                { title: 'Unplayed Melody', date: 'Autumn 1990',
+                    text: 'Marcus started soccer this year. And then piano, briefly. And then debate club. I watch him grow and I am so proud, but sometimes I catch myself staring at the violin case in the corner. The lessons I promised... I will find the right moment. The violin is patient. It has waited decades.' },
+                { title: 'The Final Note', date: 'Winter 2001',
+                    text: 'My hands are not what they were. The arthritis makes vibrato difficult, but I still play every morning—just a few scales, a fragment of melody. The violin understands. It has grown old with me. Marcus called today. He is an accountant now. So serious! I wish he could hear the music I still hear in my dreams.' },
+            ];
+
+            function checkJournalUnlock() {
+                let threshold = Math.floor(fragmentsCollected / 2) + 1;
+                for (let i = 0; i < journalEntries.length; i++) {
+                    if (!unlockedIndices.includes(i) && i < threshold && fragmentsCollected >= (i + 1) * 2 - 1) {
+                        unlockedIndices.push(i);
+                        journalQueue.push(i);
+                    }
+                }
+            }
+
+            function showNextJournal() {
+                if (journalQueue.length === 0) return;
+                let idx = journalQueue.shift();
+                let entry = journalEntries[idx];
+                jtitle.textContent = entry.title;
+                jdate.textContent = entry.date;
+                jtext.textContent = entry.text;
+                journalModal.classList.add('show');
+                showingJournal = true;
+            }
+
+            function closeJournal() {
+                journalModal.classList.remove('show');
+                showingJournal = false;
+                setTimeout(() => {
+                    if (journalQueue.length > 0 && !showingJournal) showNextJournal();
+                }, 400);
+            }
+
+            // ──────────────────────────────────────
+            // PARTICLES
+            // ──────────────────────────────────────
+            function spawnParticles(x, y, count, color) {
+                for (let i = 0; i < count; i++) {
+                    particles.push({
+                        x,
+                        y,
+                        vx: (Math.random() - 0.5) * 4,
+                        vy: (Math.random() - 0.5) * 4 - 3,
+                        life: 30 + Math.random() * 30,
+                        maxLife: 60,
+                        color,
+                        size: 1 + Math.random() * 3,
+                    });
+                }
+            }
+
+            function initDustMotes() {
+                dustMotes = [];
+                for (let i = 0; i < 40; i++) {
+                    dustMotes.push({
+                        x: Math.random() * W,
+                        y: Math.random() * H,
+                        vx: (Math.random() - 0.5) * 0.3,
+                        vy: -0.1 - Math.random() * 0.3,
+                        size: 0.5 + Math.random() * 1.8,
+                        alpha: 0.15 + Math.random() * 0.35,
+                        twinkle: Math.random() * Math.PI * 2,
+                    });
+                }
+            }
+
+            function initMusicalNotes() {
+                musicalNotes = [];
+                for (let i = 0; i < 15; i++) {
+                    musicalNotes.push({
+                        x: Math.random() * W,
+                        y: Math.random() * H,
+                        vx: (Math.random() - 0.5) * 0.4,
+                        vy: -0.2 - Math.random() * 0.6,
+                        symbol: ['♪', '♫', '♩', '♬', '♭'][Math.floor(Math.random() * 5)],
+                        size: 10 + Math.random() * 16,
+                        alpha: 0.15 + Math.random() * 0.3,
+                        twinkle: Math.random() * Math.PI * 2,
+                    });
+                }
+            }
+
+            // ──────────────────────────────────────
+            // UPDATE
+            // ──────────────────────────────────────
+            function update() {
+                if (showingJournal) {
+                    // still update particles
+                    updateParticles();
+                    updateDust();
+                    updateNotes();
+                    return;
+                }
+
+                // Transition
+                if (targetTransition > transitionAlpha) transitionAlpha = Math.min(1, transitionAlpha + 0.04);
+                else if (targetTransition < transitionAlpha) transitionAlpha = Math.max(0, transitionAlpha - 0.04);
+
+                // Movement
+                let dx = 0,
+                    dy = 0;
+                if (keys['ArrowUp'] || keys['w']) dy = -1;
+                if (keys['ArrowDown'] || keys['s']) dy = 1;
+                if (keys['ArrowLeft'] || keys['a']) dx = -1;
+                if (keys['ArrowRight'] || keys['d']) dx = 1;
+
+                player.isMoving = dx !== 0 || dy !== 0;
+                if (player.isMoving) {
+                    let len = Math.sqrt(dx * dx + dy * dy);
+                    dx /= len;
+                    dy /= len;
+                    player.vx = dx * player.speed;
+                    player.vy = dy * player.speed;
+                    if (dx !== 0) player.facing = dx > 0 ? 1 : -1;
+                    player.walkTimer += 0.18;
+                    player.walkFrame = Math.floor(player.walkTimer) % 4;
+                } else {
+                    player.vx *= 0.8;
+                    player.vy *= 0.8;
+                    player.walkTimer = 0;
+                    player.walkFrame = 0;
+                }
+
+                let nx = player.x + player.vx;
+                let ny = player.y + player.vy;
+                let bounds = world === WORLD.ATTIC ?
+                    { minX: 30, maxX: 970, minY: 70, maxY: 620 } :
+                    { minX: 30, maxX: 970, minY: 60, maxY: 640 };
+                if (nx > bounds.minX && nx < bounds.maxX) player.x = nx;
+                if (ny > bounds.minY && ny < bounds.maxY) player.y = ny;
+
+                // Collect fragments
+                for (let frag of fragments) {
+                    if (frag.collected || frag.world !== world) continue;
+                    let d = Math.hypot(player.x - frag.x, player.y - player.height / 2 - frag.y);
+                    if (d < 22) {
+                        collectFragment(frag);
+                    }
+                }
+
+                // Update particles
+                updateParticles();
+                updateDust();
+                updateNotes();
+
+                // Update fragment glow
+                for (let frag of fragments) {
+                    if (!frag.collected) frag.glow += 0.04;
+                }
+
+                // Hint bar proximity
+                let nearby = getInteractable();
+                if (nearby && !showingJournal) {
+                    hintBar.textContent = nearby.hint || nearby.label;
+                    hintBar.style.opacity = '1';
+                } else if (!showingJournal) {
+                    hintBar.textContent = world === WORLD.ATTIC ? 'attic · explore & press E near objects' :
+                        'Soundscape · play the violin, find memories';
+                    hintBar.style.opacity = '0.8';
+                }
+            }
+
+            function updateParticles() {
+                for (let p of particles) {
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.life--;
+                }
+                particles = particles.filter(p => p.life > 0);
+            }
+
+            function updateDust() {
+                for (let d of dustMotes) {
+                    d.x += d.vx;
+                    d.y += d.vy;
+                    d.twinkle += 0.02;
+                    if (d.y < -10) d.y = H + 10;
+                    if (d.x < -10) d.x = W + 10;
+                    if (d.x > W + 10) d.x = -10;
+                }
+            }
+
+            function updateNotes() {
+                for (let n of musicalNotes) {
+                    n.x += n.vx;
+                    n.y += n.vy;
+                    n.twinkle += 0.03;
+                    if (n.y < -30) n.y = H + 30;
+                    if (n.x < -30) n.x = W + 30;
+                    if (n.x > W + 30) n.x = -30;
+                }
+            }
+
+            // ──────────────────────────────────────
+            // RENDER
+            // ──────────────────────────────────────
+            function drawBackground() {
+                if (world === WORLD.ATTIC) {
+                    drawAtticBackground();
+                } else {
+                    drawSoundscapeBackground();
+                }
+            }
+
+            function drawAtticBackground() {
+                // Warm, dusty attic
+                let grad = ctx.createLinearGradient(0, 0, 0, H);
+                grad.addColorStop(0, '#2a1f14');
+                grad.addColorStop(0.5, '#1e150d');
+                grad.addColorStop(1, '#120b06');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, W, H);
+
+                // Wooden floorboards
+                ctx.strokeStyle = '#3a2818';
+                ctx.lineWidth = 1.5;
+                for (let i = 0; i < 22; i++) {
+                    let y = 50 + i * 27;
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(W, y);
+                    ctx.stroke();
+                }
+                // vertical plank lines
+                ctx.strokeStyle = '#2a1a0c';
+                ctx.lineWidth = 0.6;
+                for (let i = 0; i < 30; i++) {
+                    let x = i * 35 + (i % 3) * 12;
+                    ctx.beginPath();
+                    ctx.moveTo(x, 50);
+                    ctx.lineTo(x, H);
+                    ctx.stroke();
+                }
+
+                // Beams on ceiling
+                ctx.fillStyle = '#1a1008';
+                ctx.fillRect(0, 0, W, 28);
+                ctx.fillStyle = '#251810';
+                for (let i = 0; i < 8; i++) {
+                    ctx.fillRect(i * 140, 0, 50, 32);
+                }
+
+                // Window with rain
+                drawWindow(windowPos.x, windowPos.y, windowPos.w, windowPos.h);
+
+                // Dusty light ray from window
+                let rayGrad = ctx.createLinearGradient(windowPos.x + windowPos.w / 2, windowPos.y + windowPos.h, windowPos
+                    .x + windowPos.w / 2, H);
+                rayGrad.addColorStop(0, 'rgba(255,220,160,0.07)');
+                rayGrad.addColorStop(1, 'rgba(255,200,120,0)');
+                ctx.fillStyle = rayGrad;
+                ctx.beginPath();
+                ctx.moveTo(windowPos.x + 10, windowPos.y + windowPos.h);
+                ctx.lineTo(windowPos.x + windowPos.w - 10, windowPos.y + windowPos.h);
+                ctx.lineTo(windowPos.x + windowPos.w + 80, H);
+                ctx.lineTo(windowPos.x - 80, H);
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            function drawWindow(x, y, w, h) {
+                // frame
+                ctx.fillStyle = '#1a1008';
+                ctx.fillRect(x - 6, y - 6, w + 12, h + 12);
+                ctx.fillStyle = '#3a2818';
+                ctx.fillRect(x, y, w, h);
+                // glass
+                let glassGrad = ctx.createLinearGradient(x, y, x, y + h);
+                glassGrad.addColorStop(0, '#8899aa');
+                glassGrad.addColorStop(0.5, '#556678');
+                glassGrad.addColorStop(1, '#334455');
+                ctx.fillStyle = glassGrad;
+                ctx.fillRect(x + 4, y + 4, w - 8, h - 8);
+                // rain streaks
+                ctx.strokeStyle = 'rgba(180,200,220,0.3)';
+                ctx.lineWidth = 0.8;
+                for (let i = 0; i < 12; i++) {
+                    let rx = x + 8 + i * (w - 16) / 11;
+                    let ry = y + 6 + (i * 17) % (h - 12);
+                    ctx.beginPath();
+                    ctx.moveTo(rx, ry);
+                    ctx.lineTo(rx - 2, ry + 8);
+                    ctx.stroke();
+                }
+                // raindrop dots
+                ctx.fillStyle = 'rgba(200,220,240,0.4)';
+                for (let i = 0; i < 8; i++) {
+                    let dx = x + 10 + Math.random() * (w - 20);
+                    let dy = y + 8 + Math.random() * (h - 16);
+                    ctx.beginPath();
+                    ctx.arc(dx, dy, 1.2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            function drawSoundscapeBackground() {
+                // Deep, musical dreamscape
+                let grad = ctx.createLinearGradient(0, 0, W * 0.3, H * 0.7);
+                grad.addColorStop(0, '#0a0a20');
+                grad.addColorStop(0.4, '#151030');
+                grad.addColorStop(0.7, '#1a1535');
+                grad.addColorStop(1, '#0d0820');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, W, H);
+
+                // Flowing wave patterns
+                let t = Date.now() / 1000;
+                for (let wave = 0; wave < 5; wave++) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = `hsla(${260 + wave * 15}, 50%, 50%, ${0.08 + wave * 0.02})`;
+                    ctx.lineWidth = 1.5 + wave * 0.8;
+                    let baseY = 100 + wave * 110;
+                    for (let x = 0; x < W; x += 4) {
+                        let yy = baseY + Math.sin(x * 0.006 + t * 0.7 + wave) * 40 + Math.cos(x * 0.012 - t * 0.5) * 25;
+                        if (x === 0) ctx.moveTo(x, yy);
+                        else ctx.lineTo(x, yy);
+                    }
+                    ctx.stroke();
+                }
+
+                // Glowing orbs
+                for (let i = 0; i < 8; i++) {
+                    let ox = 100 + i * 110;
+                    let oy = 150 + Math.sin(t * 0.3 + i) * 60;
+                    let glow = ctx.createRadialGradient(ox, oy, 0, ox, oy, 40);
+                    glow.addColorStop(0, 'rgba(180,160,240,0.15)');
+                    glow.addColorStop(1, 'rgba(0,0,0,0)');
+                    ctx.fillStyle = glow;
+                    ctx.beginPath();
+                    ctx.arc(ox, oy, 40, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            function drawObjects() {
+                for (let obj of objects) {
+                    let cx = obj.x + obj.w / 2;
+                    let cy = obj.y + obj.h / 2;
+                    // Proximity glow
+                    let pdist = Math.hypot(player.x - cx, player.y - player.height / 2 - cy);
+                    if (pdist < 70) {
+                        let glowAlpha = (70 - pdist) / 70 * 0.4;
+                        let glow = ctx.createRadialGradient(cx, cy, 5, cx, cy, 35);
+                        glow.addColorStop(0, `rgba(240,200,150,${glowAlpha})`);
+                        glow.addColorStop(1, 'rgba(0,0,0,0)');
+                        ctx.fillStyle = glow;
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, 35, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+
+                    switch (obj.type) {
+                        case 'violin':
+                            drawViolinShape(obj.x, obj.y, obj.w, obj.h);
+                            break;
+                        case 'drawer':
+                            ctx.fillStyle = obj.opened ? '#4a3020' : '#3a2518';
+                            ctx.fillRect(obj.x, obj.y, obj.w, obj.h);
+                            ctx.strokeStyle = '#5a3a24';
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
+                            ctx.fillStyle = '#c8a060';
+                            ctx.beginPath();
+                            ctx.arc(obj.x + obj.w / 2, obj.y - 2, 5, 0, Math.PI * 2);
+                            ctx.fill();
+                            if (obj.opened) {
+                                ctx.fillStyle = '#e8d5c0';
+                                ctx.fillRect(obj.x + 8, obj.y + 6, obj.w - 16, obj.h - 12);
+                            }
+                            break;
+                        case 'album':
+                            ctx.fillStyle = '#5c3a20';
+                            ctx.fillRect(obj.x, obj.y, obj.w, obj.h);
+                            ctx.strokeStyle = '#8a6040';
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
+                            ctx.fillStyle = '#e8d5c0';
+                            ctx.fillRect(obj.x + 6, obj.y + 5, obj.w - 12, obj.h - 10);
+                            ctx.fillStyle = '#c8a060';
+                            ctx.font = '8px Georgia';
+                            ctx.fillText('📷', obj.x + 14, obj.y + 22);
+                            break;
+                        case 'musicbox':
+                            ctx.fillStyle = '#4a3020';
+                            ctx.fillRect(obj.x, obj.y, obj.w, obj.h);
+                            ctx.strokeStyle = '#c8a060';
+                            ctx.lineWidth = 1.5;
+                            ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
+                            ctx.fillStyle = '#e8cfa0';
+                            ctx.beginPath();
+                            ctx.arc(obj.x + obj.w / 2, obj.y + obj.h / 2, 8, 0, Math.PI * 2);
+                            ctx.fill();
+                            break;
+                        case 'window':
+                            // already drawn in background
+                            break;
+                        case 'letter':
+                            ctx.fillStyle = '#f5ecd7';
+                            ctx.fillRect(obj.x, obj.y, obj.w, obj.h);
+                            ctx.strokeStyle = '#c8b898';
+                            ctx.lineWidth = 1;
+                            ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
+                            ctx.fillStyle = '#8a7050';
+                            ctx.font = '7px Georgia';
+                            ctx.fillText('💌', obj.x + 7, obj.y + 15);
+                            break;
+                        case 'trunk':
+                            ctx.fillStyle = '#3a2010';
+                            ctx.fillRect(obj.x, obj.y, obj.w, obj.h);
+                            ctx.strokeStyle = '#6a4a2a';
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
+                            ctx.fillStyle = '#c8a060';
+                            ctx.fillRect(obj.x + obj.w / 2 - 8, obj.y - 4, 16, 8);
+                            if (obj.opened) {
+                                ctx.fillStyle = '#1a0a04';
+                                ctx.fillRect(obj.x + 5, obj.y + 5, obj.w - 10, obj.h - 10);
+                            }
+                            break;
+                        case 'portal':
+                            let pulse = 0.6 + Math.sin(Date.now() / 600) * 0.4;
+                            let pgrad = ctx.createRadialGradient(cx, cy, 4, cx, cy, 30);
+                            pgrad.addColorStop(0, `rgba(240,200,100,${pulse})`);
+                            pgrad.addColorStop(0.6, 'rgba(180,140,60,0.3)');
+                            pgrad.addColorStop(1, 'rgba(0,0,0,0)');
+                            ctx.fillStyle = pgrad;
+                            ctx.beginPath();
+                            ctx.arc(cx, cy, 30, 0, Math.PI * 2);
+                            ctx.fill();
+                            ctx.fillStyle = '#f0d878';
+                            ctx.font = '20px Georgia';
+                            ctx.fillText('🌀', cx - 14, cy + 8);
+                            break;
+                        case 'pedestal':
+                            ctx.fillStyle = '#2a2040';
+                            ctx.fillRect(obj.x, obj.y + 15, obj.w, obj.h - 15);
+                            ctx.fillStyle = '#3a3050';
+                            ctx.beginPath();
+                            ctx.arc(cx, obj.y + 12, obj.w / 2, 0, Math.PI * 2);
+                            ctx.fill();
+                            ctx.fillStyle = obj.used ? '#f0c860' : '#8870b0';
+                            ctx.beginPath();
+                            ctx.arc(cx, obj.y + 8, 8, 0, Math.PI * 2);
+                            ctx.fill();
+                            break;
+                    }
+                }
+            }
+
+            function drawViolinShape(x, y, w, h) {
+                let cx = x + w / 2;
+                let cy = y + h / 2;
+                // Body
+                ctx.fillStyle = '#5c3018';
+                ctx.beginPath();
+                ctx.ellipse(cx, cy - 6, w * 0.35, h * 0.35, 0.05, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.ellipse(cx, cy + 10, w * 0.4, h * 0.3, -0.03, 0, Math.PI * 2);
+                ctx.fill();
+                // Neck
+                ctx.fillStyle = '#3a1a08';
+                ctx.fillRect(cx - 3, cy - h * 0.5, 6, h * 0.55);
+                // Scroll
+                ctx.fillStyle = '#4a2810';
+                ctx.beginPath();
+                ctx.arc(cx, cy - h * 0.48, 8, 0, Math.PI * 2);
+                ctx.fill();
+                // Strings
+                ctx.strokeStyle = '#e8d5c0';
+                ctx.lineWidth = 0.5;
+                for (let i = -2; i <= 2; i += 1.3) {
+                    ctx.beginPath();
+                    ctx.moveTo(cx + i, cy - h * 0.4);
+                    ctx.lineTo(cx + i, cy + h * 0.3);
+                    ctx.stroke();
+                }
+                // Bridge
+                ctx.fillStyle = '#d4b896';
+                ctx.fillRect(cx - 8, cy + 2, 16, 2.5);
+                // Glow
+                let vglow = ctx.createRadialGradient(cx, cy, 3, cx, cy, 28);
+                vglow.addColorStop(0, 'rgba(240,180,80,0.25)');
+                vglow.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = vglow;
+                ctx.beginPath();
+                ctx.arc(cx, cy, 28, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            function drawPlayerCharacter() {
+                let px = player.x;
+                let py = player.y;
+                let f = player.facing;
+                let wf = player.walkFrame;
+                let moving = player.isMoving;
+
+                ctx.save();
+                ctx.translate(px, py);
+
+                // Shadow
+                ctx.fillStyle = 'rgba(0,0,0,0.4)';
+                ctx.beginPath();
+                ctx.ellipse(0, 2, 10, 4, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Legs with walk animation
+                let legOffset = moving ? Math.sin(wf * Math.PI / 2) * 5 : 0;
+                ctx.fillStyle = '#3a2a1a';
+                ctx.fillRect(-5, -4, 4, 14 + legOffset * 0.5);
+                ctx.fillRect(1, -4, 4, 14 - legOffset * 0.5);
+
+                // Body (slightly hunched, middle-aged man)
+                ctx.fillStyle = '#5a4030';
+                ctx.beginPath();
+                ctx.roundRect(-8, -32, 16, 22, 5);
+                ctx.fill();
+                // Coat detail
+                ctx.fillStyle = '#4a3028';
+                ctx.fillRect(-6, -28, 12, 16);
+                // Belt
+                ctx.fillStyle = '#2a1a10';
+                ctx.fillRect(-7, -14, 14, 3);
+
+                // Arms
+                let armSwing = moving ? Math.sin(wf * Math.PI / 2) * 4 : 0;
+                ctx.fillStyle = '#5a4030';
+                ctx.fillRect(-11, -28, 4, 12 + armSwing);
+                ctx.fillRect(7, -28, 4, 12 - armSwing);
+                // Hands
+                ctx.fillStyle = '#d4b896';
+                ctx.beginPath();
+                ctx.arc(-9, -16 + armSwing, 3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(9, -16 - armSwing, 3, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Head
+                ctx.fillStyle = '#d4b896';
+                ctx.beginPath();
+                ctx.arc(0, -36, 9, 0, Math.PI * 2);
+                ctx.fill();
+                // Hair (receding, gray)
+                ctx.fillStyle = '#8a7a6a';
+                ctx.beginPath();
+                ctx.arc(0, -38, 8, Math.PI, Math.PI * 2);
+                ctx.fill();
+                ctx.fillRect(-3, -44, 6, 5);
+                // Glasses
+                ctx.strokeStyle = '#3a3a3a';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.arc(-3, -37, 4, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(3, -37, 4, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(1, -37);
+                ctx.lineTo(-1, -37);
+                ctx.stroke();
+                // Eyes
+                ctx.fillStyle = '#1a1a2a';
+                ctx.beginPath();
+                ctx.arc(-3 + f * 1, -37, 1.2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(3 + f * 1, -37, 1.2, 0, Math.PI * 2);
+                ctx.fill();
+                // Mouth (slight, gentle)
+                ctx.strokeStyle = '#8a6a5a';
+                ctx.lineWidth = 0.7;
+                ctx.beginPath();
+                ctx.arc(0, -33, 2.5, 0, Math.PI);
+                ctx.stroke();
+
+                ctx.restore();
+            }
+
+            function drawFragments() {
+                for (let frag of fragments) {
+                    if (frag.collected || frag.world !== world) continue;
+                    let glow = 0.5 + Math.sin(frag.glow) * 0.4;
+                    let g = ctx.createRadialGradient(frag.x, frag.y, 1, frag.x, frag.y, frag.size * 2);
+                    g.addColorStop(0, `rgba(255,240,200,${glow})`);
+                    g.addColorStop(0.5, `rgba(240,180,60,${glow * 0.6})`);
+                    g.addColorStop(1, 'rgba(0,0,0,0)');
+                    ctx.fillStyle = g;
+                    ctx.beginPath();
+                    ctx.arc(frag.x, frag.y, frag.size * 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    // Core
+                    ctx.fillStyle = '#fffef0';
+                    ctx.beginPath();
+                    ctx.arc(frag.x, frag.y, frag.size * 0.4, 0, Math.PI * 2);
+                    ctx.fill();
+                    // Sparkles
+                    ctx.fillStyle = `rgba(255,255,240,${glow})`;
+                    for (let i = 0; i < 4; i++) {
+                        let a = frag.glow + i * Math.PI / 2;
+                        let sx = frag.x + Math.cos(a) * frag.size;
+                        let sy = frag.y + Math.sin(a) * frag.size;
+                        ctx.beginPath();
+                        ctx.arc(sx, sy, 1, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+
+            function drawParticlesAll() {
+                for (let p of particles) {
+                    let alpha = p.life / p.maxLife;
+                    ctx.fillStyle = p.color.replace(')', `,${alpha})`);
+                    if (p.color.startsWith('#')) {
+                        ctx.fillStyle = p.color + Math.floor(alpha * 80 + 20).toString(16).padStart(2, '0');
+                    }
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            function drawDust() {
+                for (let d of dustMotes) {
+                    let alpha = d.alpha + Math.sin(d.twinkle) * 0.1;
+                    ctx.fillStyle = `rgba(220,200,160,${alpha})`;
+                    ctx.beginPath();
+                    ctx.arc(d.x, d.y, d.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            function drawMusicalNotesAll() {
+                if (world !== WORLD.SOUNDSCAPE) return;
+                for (let n of musicalNotes) {
+                    let alpha = n.alpha + Math.sin(n.twinkle) * 0.1;
+                    ctx.fillStyle = `rgba(180,160,220,${alpha})`;
+                    ctx.font = `${n.size}px Georgia`;
+                    ctx.fillText(n.symbol, n.x, n.y);
+                }
+            }
+
+            function drawVignette() {
+                let vg = ctx.createRadialGradient(W / 2, H / 2, W * 0.45, W / 2, H / 2, W * 0.75);
+                vg.addColorStop(0, 'rgba(0,0,0,0)');
+                vg.addColorStop(1, 'rgba(0,0,0,0.55)');
+                ctx.fillStyle = vg;
+                ctx.fillRect(0, 0, W, H);
+            }
+
+            function render() {
+                ctx.clearRect(0, 0, W, H);
+                drawBackground();
+                if (world === WORLD.SOUNDSCAPE) drawMusicalNotesAll();
+                drawDust();
+                drawObjects();
+                drawFragments();
+                drawParticlesAll();
+                drawPlayerCharacter();
+                drawVignette();
+
+                // Transition overlay
+                if (transitionAlpha > 0.01) {
+                    ctx.fillStyle = `rgba(0,0,0,${transitionAlpha})`;
+                    ctx.fillRect(0, 0, W, H);
+                    ctx.fillStyle = `rgba(240,200,100,${transitionAlpha * 0.3})`;
+                    ctx.font = 'italic 18px Georgia';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('~', W / 2, H / 2);
+                }
+            }
+
+            // ──────────────────────────────────────
+            // GAME LOOP
+            // ──────────────────────────────────────
+            function gameLoop() {
+                update();
+                render();
+                requestAnimationFrame(gameLoop);
+            }
+
+            // ──────────────────────────────────────
+            // INIT
+            // ──────────────────────────────────────
+            function init() {
+                resize();
+                world = WORLD.ATTIC;
+                fragmentsCollected = 0;
+                unlockedIndices = [];
+                journalQueue = [];
+                showingJournal = false;
+                transitionAlpha = 0;
+                targetTransition = 0;
+                player.x = 180;
+                player.y = 380;
+                player.facing = 1;
+                player.walkFrame = 0;
+                player.walkTimer = 0;
+                particles = [];
+                fragments = [];
+                buildObjects();
+                spawnInitialFragments();
+                totalFragmentsInWorld = fragments.length;
+                initDustMotes();
+                initMusicalNotes();
+                fragmentUI.textContent = '✦ 0';
+                hintBar.textContent = 'arrow keys to move · explore the attic';
+                hintBar.style.opacity = '0.8';
+                journalModal.classList.remove('show');
+                requestAnimationFrame(gameLoop);
+            }
+
+            init();
+            console.log('🎻 Rosinhands — Story Mode ready.');
+            console.log('Use Arrow Keys or WASD to walk. Press E near objects to interact.');
+            console.log('Collect glowing memory fragments to unlock Elsa\'s journal.');
+        })();
+    </script>
+</body>
+</html>
