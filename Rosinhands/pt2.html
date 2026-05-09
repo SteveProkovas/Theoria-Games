@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Rosinhands · Story Mode</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      background: #0b0704;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      font-family: 'Georgia', 'Times New Roman', serif;
+      overflow: hidden;
+    }
+    #game-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      max-width: 1000px;
+      max-height: 700px;
+      box-shadow: 0 0 60px rgba(0,0,0,0.8);
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    #ui-bar {
+      position: absolute;
+      bottom: 12px;
+      left: 20px;
+      right: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      pointer-events: none;
+      color: #c8a45c;
+      font-size: 0.9em;
+      letter-spacing: 0.05em;
+      text-shadow: 0 0 10px rgba(0,0,0,0.7);
+    }
+    #journal-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(8, 4, 2, 0.9);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 20;
+      cursor: pointer;
+      flex-direction: column;
+    }
+    #journal-overlay.active {
+      display: flex;
+    }
+    #journal-panel {
+      background: #1e1810;
+      border: 1px solid #4a3a24;
+      max-width: 450px;
+      padding: 30px;
+      color: #d4c5b9;
+      text-align: center;
+      line-height: 1.8;
+      box-shadow: 0 0 50px rgba(0,0,0,0.7);
+    }
+    #journal-panel h2 {
+      color: #e8b860;
+      font-weight: normal;
+      margin-bottom: 10px;
+    }
+    #journal-panel .date {
+      font-size: 0.8em;
+      color: #8a7555;
+      margin-bottom: 18px;
+    }
+    #journal-panel .close-hint {
+      font-size: 0.7em;
+      color: #5e4d38;
+      margin-top: 25px;
+      letter-spacing: 0.06em;
+    }
+    .fade-out {
+      animation: fade 0.25s ease-out;
+    }
+    @keyframes fade {
+      from { opacity: 1; }
+      to { opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+<div id="game-container">
+  <canvas id="gameCanvas"></canvas>
+  <div id="ui-bar">
+    <span id="fragment-count">✦ 0 fragments</span>
+    <span id="world-hint" style="opacity:0.8;"></span>
+  </div>
+  <div id="journal-overlay">
+    <div id="journal-panel">
+      <h2 id="journal-title"></h2>
+      <div class="date" id="journal-date"></div>
+      <p id="journal-text"></p>
+      <div class="close-hint">click or press ENTER to continue</div>
+    </div>
+  </div>
+</div>
+<script>
+  (function() {
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // DOM elements
+    const fragmentCountSpan = document.getElementById('fragment-count');
+    const worldHintSpan = document.getElementById('world-hint');
+    const journalOverlay = document.getElementById('journal-overlay');
+    const journalTitle = document.getElementById('journal-title');
+    const journalDate = document.getElementById('journal-date');
+    const journalText = document.getElementById('journal-text');
+
+    // ── Canvas sizing ──────────────────────────
+    let W, H;
+    function resize() {
+      const container = document.getElementById('game-container');
+      W = container.clientWidth;
+      H = container.clientHeight;
+      canvas.width = W;
+      canvas.height = H;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // ── Game state ─────────────────────────────
+    const WORLD = { REAL: 'real', SOUNDSCAPE: 'soundscape' };
+    let currentWorld = WORLD.REAL;
+    let fragmentsCollected = 0;
+    const FRAGMENTS_TO_UNLOCK_NEXT = 4; // unlock a journal every 4 fragments
+    let totalJournalEntries = 7;
+    let unlockedJournals = [];      // indices
+    let showingJournal = false;
+    let journalQueue = [];          // indices to show sequentially
+
+    // ── Player ────────────────────────────────
+    let player = {
+      x: 200, y: 300,
+      radius: 10,
+      speed: 2.8,
+      facing: 'down' // not used visually, but could
+    };
+
+    // ── Keys ──────────────────────────────────
+    const keys = {
+      ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false,
+      w: false, a: false, s: false, d: false,
+    };
+
+    // ── World boundaries (abstract rooms) ─────
+    const realWorldBounds = { minX: 60, minY: 80, maxX: 940, maxY: 620 };
+    const soundscapeBounds = { minX: 40, minY: 40, maxX: 960, maxY: 660 };
+
+    // ── Interactive objects ──────────────────
+    let violinPos = { x: 680, y: 340 }; // in real world, to transition
+    let fragments = []; // will be spawned in both worlds
+
+    // ── Particles for ambiance ───────────────
+    let particles = [];
+
+    // ── Journal data (same as before, adapted) ──
+    const journalEntries = [
+      { title: 'First Touch', date: 'Berlin, October 1937', text: 'Papa brought home the Mittenwald today. The varnish still soft, smelling of pine and amber. He said, "Elsa, this violin will carry your voice when words fail." I ran my fingers over the strings and felt them hum, even in silence.' },
+      { title: 'The Last Concert', date: 'Vienna, March 1944', text: 'The hall was half-empty, but those who came listened with their whole souls. I played the Bach Chaconne and felt the notes become a prayer. Outside, the world was crumbling, but inside that music, we were infinite.' },
+      { title: 'The Crossing', date: 'Somewhere at Sea, June 1946', text: 'The violin case stayed in my lap the entire voyage. A woman asked if I would play something to calm the children. I played a lullaby my grandmother taught me. For one hour, fear lifted. Music is not entertainment—it is a raft.' },
+      { title: 'New Soil', date: 'New York, September 1947', text: 'I played in a small church today. The acoustics were humble but honest. Afterward, a man named George Halverson introduced himself. He said my playing reminded him of autumn in a place he could not name. I think I blushed.' },
+      { title: 'Small Hands', date: 'Spring 1985', text: 'Little Marcus came to visit today. He stared at the violin case with such wonder. He asked, "Grandma, will you teach me?" I said, "When you are ready, my dear." His hands are still so small. There is time. There is always time.' },
+      { title: 'Unplayed Melody', date: 'Autumn 1990', text: 'Marcus started soccer this year. Then piano, briefly. Then debate club. I am so proud, but sometimes I catch myself staring at the violin case. The lessons I promised... I will find the right moment. The violin is patient.' },
+      { title: 'The Final Note', date: 'Winter 2001', text: 'My hands are not what they were. I still play every morning—just a few scales. Marcus called today, so serious as an accountant. I wish he could hear the music I still hear in my dreams. Perhaps one day he will find the violin and understand.' },
+    ];
+
+    // ── Fragment spawning ──────────────────────
+    function spawnFragments(count, worldType) {
+      const bounds = worldType === WORLD.REAL ? realWorldBounds : soundscapeBounds;
+      for (let i = 0; i < count; i++) {
+        fragments.push({
+          x: bounds.minX + Math.random() * (bounds.maxX - bounds.minX),
+          y: bounds.minY + Math.random() * (bounds.maxY - bounds.minY),
+          collected: false,
+          glow: Math.random() * Math.PI * 2,
+          world: worldType
+        });
+      }
+    }
+
+    // Initial fragments
+    function resetFragments() {
+      fragments = [];
+      spawnFragments(5, WORLD.REAL);
+      spawnFragments(8, WORLD.SOUNDSCAPE);
+    }
+
+    // ── Journal unlocking ──────────────────────
+    function checkJournalUnlock() {
+      // unlock next entry based on fragments collected milestone
+      let nextIndex = Math.floor(fragmentsCollected / FRAGMENTS_TO_UNLOCK_NEXT);
+      for (let i = 0; i < journalEntries.length; i++) {
+        if (!unlockedJournals.includes(i) && i < nextIndex) {
+          unlockedJournals.push(i);
+          journalQueue.push(i);
+        }
+      }
+    }
+
+    function showNextJournal() {
+      if (showingJournal) return;
+      if (journalQueue.length > 0) {
+        let idx = journalQueue.shift();
+        displayJournal(idx);
+        return true;
+      }
+      return false;
+    }
+
+    function displayJournal(index) {
+      const entry = journalEntries[index];
+      journalTitle.textContent = entry.title;
+      journalDate.textContent = entry.date;
+      journalText.textContent = entry.text;
+      journalOverlay.classList.add('active');
+      showingJournal = true;
+    }
+
+    function closeJournal() {
+      journalOverlay.classList.remove('active');
+      showingJournal = false;
+      // Try to show next queued after a tiny delay
+      setTimeout(() => {
+        if (!showNextJournal()) {
+          // no more journals, continue game
+        }
+      }, 300);
+    }
+
+    // ── World transition ──────────────────────
+    function switchWorld() {
+      if (currentWorld === WORLD.REAL) {
+        currentWorld = WORLD.SOUNDSCAPE;
+        // reposition player to safe spot in soundscape
+        player.x = soundscapeBounds.minX + 80;
+        player.y = soundscapeBounds.minY + 80;
+        worldHintSpan.textContent = 'Soundscape · play the violin?';
+      } else {
+        currentWorld = WORLD.REAL;
+        player.x = violinPos.x + 30;
+        player.y = violinPos.y - 20;
+        worldHintSpan.textContent = 'Real World · explore the attic';
+      }
+    }
+
+    // ── Interaction (press E near violin) ─────
+    function handleInteraction() {
+      if (currentWorld === WORLD.REAL) {
+        let dx = player.x - violinPos.x;
+        let dy = player.y - violinPos.y;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < 45) {
+          switchWorld();
+        }
+      } else {
+        // In soundscape, you can't directly switch back without interacting with a portal
+        // but for simplicity, allow switching by pressing E near any edge? We'll add a portal object.
+        let portalPos = { x: 500, y: 500 };
+        let dx = player.x - portalPos.x;
+        let dy = player.y - portalPos.y;
+        if (Math.sqrt(dx*dx+dy*dy) < 40) {
+          switchWorld();
+        }
+      }
+    }
+
+    // ── Collect fragments ─────────────────────
+    function collectFragment(frag) {
+      frag.collected = true;
+      fragmentsCollected++;
+      fragmentCountSpan.textContent = `✦ ${fragmentsCollected} fragments`;
+      // spawn particles
+      for (let i=0;i<12;i++) {
+        particles.push({
+          x: frag.x, y: frag.y,
+          vx: (Math.random()-0.5)*4, vy: (Math.random()-0.5)*4-2,
+          life: 40+Math.random()*20, maxLife: 60,
+          color: '#f0c860'
+        });
+      }
+      checkJournalUnlock();
+      if (!showingJournal) showNextJournal();
+    }
+
+    // ── Update loop ───────────────────────────
+    function update() {
+      // Movement
+      let dx = 0, dy = 0;
+      if (keys.ArrowUp || keys.w) dy -= 1;
+      if (keys.ArrowDown || keys.s) dy += 1;
+      if (keys.ArrowLeft || keys.a) dx -= 1;
+      if (keys.ArrowRight || keys.d) dx += 1;
+
+      if (dx !== 0 || dy !== 0) {
+        let len = Math.sqrt(dx*dx + dy*dy);
+        dx /= len;
+        dy /= len;
+      }
+
+      let newX = player.x + dx * player.speed;
+      let newY = player.y + dy * player.speed;
+
+      const bounds = currentWorld === WORLD.REAL ? realWorldBounds : soundscapeBounds;
+      if (newX - player.radius >= bounds.minX && newX + player.radius <= bounds.maxX) player.x = newX;
+      if (newY - player.radius >= bounds.minY && newY + player.radius <= bounds.maxY) player.y = newY;
+
+      // Fragment collection
+      for (let frag of fragments) {
+        if (frag.collected || frag.world !== currentWorld) continue;
+        let d = Math.hypot(player.x - frag.x, player.y - frag.y);
+        if (d < player.radius + 12) {
+          collectFragment(frag);
+        }
+      }
+
+      // Remove collected fragments
+      fragments = fragments.filter(f => !f.collected);
+
+      // Update particles
+      for (let p of particles) {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= 1;
+      }
+      particles = particles.filter(p => p.life > 0);
+
+      // Update fragment glow animation
+      for (let frag of fragments) {
+        frag.glow += 0.03;
+      }
+    }
+
+    // ── Rendering ──────────────────────────────
+    function drawBackground() {
+      if (currentWorld === WORLD.REAL) {
+        // Attic: warm wooden tones
+        let grad = ctx.createLinearGradient(0,0,0,H);
+        grad.addColorStop(0,'#3a2c1c');
+        grad.addColorStop(0.7,'#1f180e');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0,0,W,H);
+        // wooden floor planks
+        ctx.strokeStyle = '#4a3822';
+        ctx.lineWidth = 1;
+        for(let i=0;i<20;i++){
+          let y = 80 + i*28;
+          ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+        }
+        // Window light
+        ctx.fillStyle = 'rgba(255,240,200,0.08)';
+        ctx.beginPath(); ctx.arc(780,160,70,0,Math.PI*2); ctx.fill();
+        // Violin on stand
+        drawViolinObject(violinPos.x, violinPos.y);
+      } else {
+        // Soundscape: ethereal flowing colors
+        let grad = ctx.createLinearGradient(0,0,W*0.2,H*0.8);
+        grad.addColorStop(0,'#1a1a3a');
+        grad.addColorStop(0.5,'#2a2540');
+        grad.addColorStop(1,'#0f1a2a');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0,0,W,H);
+        // floating music waves
+        let t = Date.now()/1000;
+        for(let i=0;i<6;i++){
+          let y = 100 + i*100;
+          ctx.beginPath();
+          ctx.strokeStyle = `hsla(${45+i*10},60%,65%,0.12)`;
+          ctx.lineWidth = 2;
+          for(let x=0;x<W;x+=20){
+            let yy = y + Math.sin(x*0.01 + t*1.2 + i)*15;
+            if(x===0) ctx.moveTo(x,yy); else ctx.lineTo(x,yy);
+          }
+          ctx.stroke();
+        }
+        // portal back to real world
+        drawPortal(500,500);
+      }
+    }
+
+    function drawViolinObject(x,y){
+      ctx.fillStyle = '#5c3e24';
+      ctx.beginPath();
+      ctx.ellipse(x, y-8, 14, 32, 0.1, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#3e2210';
+      ctx.beginPath();
+      ctx.ellipse(x, y+12, 10, 22, -0.05, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#2a1a0c';
+      ctx.fillRect(x-4, y-42, 8, 38);
+      ctx.fillStyle = '#e8cfa0';
+      ctx.font = '11px Georgia';
+      ctx.fillText('🎻', x-15, y-35);
+    }
+
+    function drawPortal(x,y){
+      let pulse = 0.7+Math.sin(Date.now()/800)*0.3;
+      let grad = ctx.createRadialGradient(x,y,2,x,y,25);
+      grad.addColorStop(0,`rgba(240,200,96,${pulse})`);
+      grad.addColorStop(1,'rgba(140,100,40,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(x,y,25,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#f0d878';
+      ctx.font = '18px Georgia';
+      ctx.fillText('🌀', x-16, y+7);
+    }
+
+    function drawFragments(){
+      for(let frag of fragments){
+        if(frag.collected || frag.world !== currentWorld) continue;
+        let glow = 0.6 + Math.sin(frag.glow)*0.4;
+        ctx.fillStyle = `rgba(240,200,96,${glow})`;
+        ctx.beginPath();
+        ctx.arc(frag.x, frag.y, 7 + glow*2, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = '#fffef0';
+        ctx.beginPath();
+        ctx.arc(frag.x, frag.y-1, 2.5, 0, Math.PI*2);
+        ctx.fill();
+        // sparkle
+        ctx.fillStyle = `rgba(255,255,240,${glow*0.9})`;
+        for(let i=0;i<4;i++){
+          let angle = frag.glow*2 + i*Math.PI/2;
+          let sx = frag.x + Math.cos(angle)*8;
+          let sy = frag.y + Math.sin(angle)*8;
+          ctx.beginPath(); ctx.arc(sx,sy,1.2,0,Math.PI*2); ctx.fill();
+        }
+      }
+    }
+
+    function drawPlayer(){
+      ctx.fillStyle = '#c8a45c';
+      ctx.shadowColor = '#f0c860';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, player.radius, 0, Math.PI*2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      // simple face
+      ctx.fillStyle = '#2a1a0c';
+      ctx.beginPath();
+      ctx.arc(player.x-3, player.y-3, 2, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath();
+      ctx.arc(player.x+3, player.y-3, 2, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#fff5e6';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(player.x, player.y+1, 3, 0, Math.PI); ctx.stroke();
+    }
+
+    function drawParticles(){
+      for(let p of particles){
+        let alpha = p.life/p.maxLife;
+        ctx.fillStyle = `rgba(240,200,96,${alpha})`;
+        ctx.beginPath(); ctx.arc(p.x,p.y,1.5*alpha+0.5,0,Math.PI*2); ctx.fill();
+      }
+    }
+
+    function drawUI() {
+      ctx.fillStyle = '#c8a45c';
+      ctx.font = '14px Georgia';
+      ctx.textAlign = 'right';
+      ctx.fillText('use ARROWS/WASD to move', W-25, 25);
+      if(currentWorld === WORLD.REAL){
+        ctx.fillText('approach violin & press E', W-25, 48);
+      } else {
+        ctx.fillText('find portal & press E to return', W-25, 48);
+      }
+      ctx.textAlign = 'left';
+    }
+
+    function render() {
+      ctx.clearRect(0,0,W,H);
+      drawBackground();
+      drawFragments();
+      drawPlayer();
+      drawParticles();
+      drawUI();
+    }
+
+    // ── Game loop ──────────────────────────────
+    function gameLoop() {
+      if (!showingJournal) {
+        update();
+      }
+      render();
+      requestAnimationFrame(gameLoop);
+    }
+
+    // ── Event listeners ────────────────────────
+    window.addEventListener('keydown', (e) => {
+      if (e.key in keys) {
+        keys[e.key] = true;
+        e.preventDefault();
+      }
+      if (e.key === 'e' || e.key === 'E') {
+        e.preventDefault();
+        if (!showingJournal) handleInteraction();
+      }
+      if (e.key === 'Enter') {
+        if (showingJournal) {
+          closeJournal();
+          e.preventDefault();
+        }
+      }
+      if (e.key === 'Escape' && showingJournal) {
+        closeJournal();
+        e.preventDefault();
+      }
+    });
+    window.addEventListener('keyup', (e) => {
+      if (e.key in keys) {
+        keys[e.key] = false;
+        e.preventDefault();
+      }
+    });
+
+    // Click on journal overlay to close
+    journalOverlay.addEventListener('click', () => {
+      if (showingJournal) closeJournal();
+    });
+
+    // Prevent context menu
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+    // ── Initialize game ────────────────────────
+    function init() {
+      resize();
+      fragmentsCollected = 0;
+      unlockedJournals = [];
+      journalQueue = [];
+      currentWorld = WORLD.REAL;
+      player.x = 200;
+      player.y = 300;
+      fragments = [];
+      particles = [];
+      resetFragments();
+      fragmentCountSpan.textContent = '✦ 0 fragments';
+      worldHintSpan.textContent = 'Real World · explore the attic';
+      // Start game loop
+      requestAnimationFrame(gameLoop);
+    }
+
+    init();
+  })();
+</script>
+</body>
+</html>
