@@ -1,0 +1,1250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROSINHANDS: A Year of First Notes</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  background: #04020c;
+  display: flex; justify-content: center; align-items: center;
+  overflow: hidden;
+  user-select: none;
+}
+canvas { cursor: none; display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ══════════════════════════════════════════════════════════════
+//   ROSINHANDS: A Year of First Notes
+//   A narrative game about adult learning, grief, and music
+//   Elena Vasquez · The Mittenwald Violin · 1937
+// ══════════════════════════════════════════════════════════════
+
+const W = 900, H = 600;
+const CV = document.getElementById('c');
+const X  = CV.getContext('2d');
+CV.width = W; CV.height = H;
+
+function resize() {
+  const s = Math.min(window.innerWidth / W, window.innerHeight / H);
+  CV.style.width  = (W * s) + 'px';
+  CV.style.height = (H * s) + 'px';
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ─── AUDIO ENGINE ────────────────────────────────────────────────
+let ACtx = null;
+function getACtx() {
+  if (!ACtx) ACtx = new (window.AudioContext || window.webkitAudioContext)();
+  return ACtx;
+}
+function playString(laneIdx, quality) {
+  try {
+    const ac = getACtx();
+    const freqs = [196, 294, 440, 659]; // G D A E
+    const freq  = freqs[laneIdx];
+    const dur   = quality === 'perfect' ? 0.85 : quality === 'good' ? 0.5 : 0.3;
+    const vol   = quality === 'perfect' ? 0.17 : quality === 'good' ? 0.11 : 0.06;
+    const fc    = quality === 'perfect' ? 1800 : quality === 'good' ? 1100 : 700;
+
+    [1, 2, 3].forEach((harm, i) => {
+      const osc = ac.createOscillator();
+      const g   = ac.createGain();
+      const flt = ac.createBiquadFilter();
+      osc.type = 'sawtooth';
+      osc.frequency.value = freq * harm;
+      flt.type = 'lowpass'; flt.frequency.value = fc / (i + 1);
+      osc.connect(flt); flt.connect(g); g.connect(ac.destination);
+      const gv = vol / (i + 1);
+      g.gain.setValueAtTime(gv, ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + dur);
+      osc.start(); osc.stop(ac.currentTime + dur);
+    });
+  } catch(_) {}
+}
+function playChime(freq = 880, dur = 0.3) {
+  try {
+    const ac = getACtx();
+    const osc = ac.createOscillator();
+    const g   = ac.createGain();
+    osc.type = 'sine'; osc.frequency.value = freq;
+    osc.connect(g); g.connect(ac.destination);
+    g.gain.setValueAtTime(0.15, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + dur);
+    osc.start(); osc.stop(ac.currentTime + dur);
+  } catch(_) {}
+}
+
+// ─── PALETTE ─────────────────────────────────────────────────────
+const P = {
+  void:   '#04020c', deep: '#0a0618',
+  cream:  '#f0dcb4', amber: '#c47828', gold: '#f0a820',
+  dust:   '#907060', rosewood: '#6a1a08',
+  G: '#b83820', D: '#c87028', A: '#d89828', E: '#f0be30',
+  sB0: '#050c1c', sB1: '#0a0316',
+  spirit: '#c8b8f2', critic: '#8a1818',
+};
+
+// ─── UTILS ───────────────────────────────────────────────────────
+function rrect(x, y, w, h, r = 7) {
+  X.beginPath();
+  X.moveTo(x + r, y);
+  X.lineTo(x + w - r, y); X.arcTo(x + w, y, x + w, y + r, r);
+  X.lineTo(x + w, y + h - r); X.arcTo(x + w, y + h, x + w - r, y + h, r);
+  X.lineTo(x + r, y + h); X.arcTo(x, y + h, x, y + h - r, r);
+  X.lineTo(x, y + r); X.arcTo(x, y, x + r, y, r);
+  X.closePath();
+}
+
+function wrapText(text, x, y, mw, lh) {
+  let cy = y;
+  for (const para of text.split('\n')) {
+    if (!para.trim()) { cy += lh * 0.45; continue; }
+    let line = '';
+    for (const word of para.split(' ')) {
+      const t = line + word + ' ';
+      if (X.measureText(t).width > mw && line) { X.fillText(line.trim(), x, cy); cy += lh; line = word + ' '; }
+      else line = t;
+    }
+    if (line.trim()) { X.fillText(line.trim(), x, cy); cy += lh; }
+    cy += lh * 0.22;
+  }
+  return cy;
+}
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+// ─── PARTICLE SYSTEM ─────────────────────────────────────────────
+let PTCLS = [];
+
+class Dot {
+  constructor(x, y, vx, vy, col, life, r = 3) {
+    Object.assign(this, { x, y, vx, vy, col, life, ml: life, r });
+  }
+  tick() { this.x += this.vx; this.y += this.vy; this.vy += 0.032; this.r *= 0.974; this.life--; }
+  draw() {
+    X.save(); X.globalAlpha = (this.life / this.ml) * 0.88;
+    X.fillStyle = this.col;
+    X.beginPath(); X.arc(this.x, this.y, Math.max(0, this.r), 0, 6.28); X.fill(); X.restore();
+  }
+  get dead() { return this.life <= 0 || this.r < 0.2; }
+}
+
+class NoteGlyph extends Dot {
+  constructor(x, y, col) {
+    const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.3;
+    const s = Math.random() * 2.2 + 0.6;
+    super(x, y, Math.cos(a) * s, Math.sin(a) * s, col, 95 + Math.random() * 40, 8);
+    this.glyph = '♩♪♫♬'[Math.floor(Math.random() * 4)];
+    this.rot = (Math.random() - 0.5) * 0.5;
+    this.rv  = (Math.random() - 0.5) * 0.068;
+  }
+  tick() { this.x += this.vx; this.y += this.vy; this.vy *= 0.994; this.rot += this.rv; this.life--; }
+  draw() {
+    X.save(); X.globalAlpha = (this.life / this.ml) * 0.84;
+    X.translate(this.x, this.y); X.rotate(this.rot);
+    X.fillStyle = this.col;
+    X.font = `${this.r * 2.1}px serif`;
+    X.textAlign = 'center'; X.textBaseline = 'middle';
+    X.fillText(this.glyph, 0, 0); X.restore();
+  }
+}
+
+function burst(x, y, col, n, type = 'dot') {
+  for (let i = 0; i < n; i++) {
+    if (type === 'note') { PTCLS.push(new NoteGlyph(x, y, col)); continue; }
+    const a = Math.random() * 6.28, s = Math.random() * 3.2 + 0.5;
+    PTCLS.push(new Dot(x, y, Math.cos(a) * s, Math.sin(a) * s - 0.5, col, 36 + Math.random() * 24, 2.2 + Math.random() * 3.6));
+  }
+}
+
+// ─── INPUT ───────────────────────────────────────────────────────
+const mouse = { x: 450, y: 300, down: false };
+const keys  = {};
+let pendingClick = false, jClick = false;
+
+CV.addEventListener('mousemove', e => {
+  const r = CV.getBoundingClientRect();
+  mouse.x = (e.clientX - r.left) * (W / r.width);
+  mouse.y = (e.clientY - r.top)  * (H / r.height);
+});
+CV.addEventListener('mousedown', () => { mouse.down = true; pendingClick = true; });
+CV.addEventListener('mouseup',   () => { mouse.down = false; });
+
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
+  if (GST === ST.PRACTICE && !pDone) {
+    const m = { KeyA: 0, KeyS: 1, KeyD: 2, KeyF: 3 };
+    if (m[e.code] !== undefined) strikeNote(m[e.code]);
+  }
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+CV.addEventListener('click', e => {
+  if (GST !== ST.PRACTICE || pDone) return;
+  const r  = CV.getBoundingClientRect();
+  const cx = (e.clientX - r.left) * (W / r.width);
+  let best = -1, bd = 58;
+  LANES.forEach((l, i) => { const d = Math.abs(cx - l.x); if (d < bd) { bd = d; best = i; } });
+  if (best >= 0) strikeNote(best);
+});
+
+// ─── BUTTON HELPER ───────────────────────────────────────────────
+function btn(label, x, y, w, h, style = 'p') {
+  const hov = mouse.x > x && mouse.x < x+w && mouse.y > y && mouse.y < y+h;
+  X.fillStyle = hov
+    ? (style === 'p' ? P.gold : '#b06020')
+    : (style === 'p' ? 'rgba(198,145,28,0.2)' : 'rgba(172,98,26,0.2)');
+  rrect(x, y, w, h); X.fill();
+  X.strokeStyle = style === 'p' ? P.amber : '#9a5e1c'; X.lineWidth = 1.5;
+  rrect(x, y, w, h); X.stroke();
+  X.fillStyle = hov ? '#110500' : P.cream;
+  X.font = '15px Georgia, serif';
+  X.textAlign = 'center'; X.textBaseline = 'middle';
+  X.fillText(label, x + w/2, y + h/2);
+  return hov && jClick;
+}
+
+// ─── VIOLIN SILHOUETTE ───────────────────────────────────────────
+function drawViolin(cx, cy, rot = 0, alpha = 0.5) {
+  X.save(); X.globalAlpha = alpha; X.translate(cx, cy); X.rotate(rot);
+  X.fillStyle = '#221008'; X.strokeStyle = P.amber; X.lineWidth = 1.4;
+  const bout = (ox, oy, rx, ry) => { X.beginPath(); X.ellipse(ox, oy, rx, ry, 0, 0, 6.28); X.fill(); X.stroke(); };
+  bout(0, -52, 28, 40); bout(0, 0, 17, 19); bout(0, 58, 34, 48);
+  X.fillRect(-4, -107, 8, 57); X.strokeRect(-4, -107, 8, 57);
+  X.beginPath(); X.arc(-1, -113, 7, 0, 6.28); X.fill(); X.stroke();
+  X.fillStyle = '#050104';
+  X.beginPath(); X.ellipse(-12, 50, 2.7, 9, -0.24, 0, 6.28); X.fill();
+  X.beginPath(); X.ellipse(12, 50, 2.7, 9, 0.24, 0, 6.28); X.fill();
+  X.strokeStyle = 'rgba(214,172,68,0.44)'; X.lineWidth = 0.7;
+  for (let i = 0; i < 4; i++) { X.beginPath(); X.moveTo(-5 + i*3.3, -105); X.lineTo(-5 + i*3.3, 107); X.stroke(); }
+  X.restore();
+}
+
+// ─── CUSTOM CURSOR ───────────────────────────────────────────────
+function drawCursor(x, y) {
+  X.save();
+  X.shadowColor = P.amber; X.shadowBlur = 7;
+  X.strokeStyle = P.cream; X.fillStyle = P.gold; X.lineWidth = 1.5;
+  X.beginPath(); X.arc(x, y, 4.5, 0, 6.28); X.fill();
+  X.beginPath();
+  X.moveTo(x, y - 9); X.lineTo(x, y - 15);
+  X.moveTo(x, y + 9); X.lineTo(x, y + 15);
+  X.moveTo(x - 9, y); X.lineTo(x - 15, y);
+  X.moveTo(x + 9, y); X.lineTo(x + 15, y);
+  X.stroke(); X.restore();
+}
+
+// ─── GAME STATE MACHINE ──────────────────────────────────────────
+const ST = { TITLE: 0, STORY: 1, ATTIC: 2, JOURNAL: 3, PRACTICE: 4, SOUND: 5, FINALE: 6 };
+let GST = ST.TITLE;
+let frame = 0, lessonIdx = 0;
+
+// Fade transition
+let fadeA = 0, fadeDst = -1, fadeDir = 0;
+function goTo(next) { fadeDst = next; fadeDir = 1; }
+function tickFade() {
+  if (fadeDir === 1) {
+    fadeA = Math.min(1, fadeA + 0.055);
+    if (fadeA >= 1) { GST = fadeDst; enterState(fadeDst); fadeDir = -1; }
+  } else if (fadeDir === -1) {
+    fadeA = Math.max(0, fadeA - 0.04);
+    if (fadeA <= 0) fadeDir = 0;
+  }
+}
+
+// ─── LORE & CONTENT ──────────────────────────────────────────────
+const STORY_D = [
+  { text: "Elena Vasquez. 38.\nSenior software developer.\n\nShe had not thought about music\nin nearly twenty years.", sub: "Until the call from Seville." },
+  { text: "Her father Miguel had kept a secret his whole life:\nan old violin, made in 1937 in Mittenwald.\n\nHe had saved it from being sold\nduring the lean years.", sub: 'He named it La Voz — The Voice.' },
+  { text: "She had always meant to learn.\nHe had always meant to teach her.\n\nLife had other plans.", sub: "Now the violin was hers." },
+  { text: 'Elena opened a browser.\nTyped: "violin lessons adults complete beginner"\n\nShe pressed Enter.', sub: "She had no idea where this would take her." }
+];
+
+const JOURNAL_D = [
+  { week: "Week 1", title: "First Contact",
+    body: "The bow felt wrong in my hands. Like holding it backwards somehow. My teacher Sofia—on video call from Porto—laughed gently and repositioned my fingers.\n\n\"The bow is not a weapon,\" she said. \"Think of it as breathing air into the string.\"\n\nI played an open G. It screeched. I texted my neighbor an apology." },
+  { week: "Week 4", title: "The Inner Critic",
+    body: "There is a voice that appears when I practice. It sounds like me but angrier. It says: you are too old for this. This is embarrassing. Real musicians started at age four.\n\nI have started calling it The Critic. Sofia says most adults experience this. \"The difference between a child and an adult,\" she told me, \"is that adults know how far they are from perfect.\"\n\nShe made it sound almost like wisdom." },
+  { week: "Week 9", title: "Something Opened",
+    body: "Tonight I played a phrase—just six notes—and something happened. It didn't sound like a mistake that accidentally produced music. It sounded like I meant it.\n\nPapá used to say: good music doesn't live in the instrument. It lives in the space between the notes. I didn't understand that until tonight.\n\nI cried a little. I'm not sure why." }
+];
+
+const LESSON_D = [
+  { title: "Lesson 1: Open Strings", sub: "Play each string as Sofia calls it",
+    bpm: 54, seq: [0,1,2,3, 0,2,1,3, 0,1,2,3],
+    hints: ["Relax your elbow.", "The bow wants to glide.", "Don't squeeze—breathe.", "Good! Keep going.", "Feel the string resonate."] },
+  { title: "Lesson 2: String Crossings", sub: "Move smoothly between strings",
+    bpm: 65, seq: [0,2,1,3, 0,3,2,1, 3,0,2,1, 3,2],
+    hints: ["Let the arm lead.", "Like water between stones.", "Trust your ear.", "Smooth! Almost musical.", "Beautiful crossing!"] },
+  { title: "Lesson 3: Father's Melody", sub: "His melody. You have been working toward this.",
+    bpm: 74, seq: [0,1,2,3, 2,1,0,2, 3,1,0,2, 1,3,2,0],
+    hints: ["This is what he heard.", "Play it like you mean it.", "That is HIS sound.", "Don't think. Just play.", "He would have loved this."] }
+];
+
+const WORLD_D = [
+  { title: "The Open String Sea",
+    frags: [
+      "He bought the violin in Granada.\nPaid for it in installments over a year.",
+      "He played for twenty years\nbefore life made him stop.",
+      "He kept it under the bed.\n\"Some things,\" he said,\n\"don't abandon you.\""
+    ],
+    spirit: "Elena... you found it.\nYou actually picked it up.\nI always knew you would." },
+  { title: "The Crossing Bridges",
+    frags: [
+      "He named it La Voz.\nHe said it spoke when he could not.",
+      "He played at your mother's funeral.\nYou were three. You don't remember.",
+      "\"Music crosses without a visa.\"\nHe said that every time he played."
+    ],
+    spirit: "Don't stop.\nThe notes that frightened you most\nwere the ones you needed." },
+  { title: "The Memory Garden",
+    frags: [
+      "The last thing he wrote:\n\"For Elena. When she's ready.\"",
+      "He always planned to teach you.\nHe was waiting for you to ask.",
+      "He knew.\nHe always knew\nyou'd find your way to it."
+    ],
+    spirit: "Play it every day, mi amor.\nNot for me.\nFor the part of you\nthat always wanted to." }
+];
+
+// ══════════════════════════════════════════════════════════════
+//   TITLE SCREEN
+// ══════════════════════════════════════════════════════════════
+let titleEaseIn = 0;
+
+function drawTitle() {
+  titleEaseIn = Math.min(1, titleEaseIn + 0.012);
+  const ease = t => t < 0.5 ? 2*t*t : -1+(4-2*t)*t; // ease in-out
+  const fa = ease(Math.min(1, frame / 80));
+
+  // Deep radial background
+  const bg = X.createRadialGradient(450, 260, 0, 450, 260, 530);
+  bg.addColorStop(0, '#1c0a2c'); bg.addColorStop(0.6, '#0e0520'); bg.addColorStop(1, P.void);
+  X.fillStyle = bg; X.fillRect(0, 0, W, H);
+
+  // Horizontal staff lines
+  for (let i = 0; i < 5; i++) {
+    const a = 0.048 + i * 0.008;
+    X.strokeStyle = `rgba(198,155,68,${a})`; X.lineWidth = 0.5;
+    X.beginPath(); X.moveTo(0, 395 + i * 13); X.lineTo(W, 395 + i * 13); X.stroke();
+  }
+
+  // Floating note particles
+  if (frame % 15 === 0) PTCLS.push(new NoteGlyph(60 + Math.random() * 780, H, P.gold));
+
+  // Violin
+  const vRot = Math.sin(frame * 0.0068) * 0.022;
+  const vBob = Math.sin(frame * 0.0092) * 0.065;
+  drawViolin(450, 305, vRot, 0.52 + vBob);
+
+  // Title glows
+  X.save(); X.globalAlpha = fa;
+  X.shadowColor = P.gold; X.shadowBlur = 32;
+  X.fillStyle = P.cream; X.font = 'bold 66px Georgia, serif';
+  X.textAlign = 'center'; X.fillText('ROSINHANDS', 450, 108);
+  X.shadowBlur = 0;
+  X.fillStyle = P.dust; X.font = 'italic 19px Georgia, serif';
+  X.fillText('A Year of First Notes', 450, 143);
+  X.fillStyle = P.amber; X.font = '12.5px Georgia, serif';
+  X.fillText('Elena Vasquez  ·  The Mittenwald Violin  ·  1937', 450, 169);
+  X.restore();
+
+  // Pulsing start prompt
+  const p = 0.42 + Math.sin(frame * 0.055) * 0.44;
+  X.globalAlpha = p * Math.min(1, (frame - 80) / 50);
+  X.fillStyle = P.cream; X.font = '14px Georgia, serif';
+  X.textAlign = 'center'; X.fillText('click anywhere to begin', 450, 560);
+  X.globalAlpha = 1;
+
+  drawCursor(mouse.x, mouse.y);
+  if (jClick && frame > 80) goTo(ST.STORY);
+}
+
+// ══════════════════════════════════════════════════════════════
+//   STORY SCREENS
+// ══════════════════════════════════════════════════════════════
+let stIdx = 0, stFa = 0;
+
+function drawStory() {
+  if (stFa < 1) stFa = Math.min(1, stFa + 0.026);
+  const s = STORY_D[stIdx];
+  const bgPairs = [['#1a0c08','#090410'],['#0e0a18','#160a2a'],['#060c1a','#0c1430'],['#08090e','#060812']];
+  const bg = X.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, bgPairs[stIdx][0]); bg.addColorStop(1, bgPairs[stIdx][1]);
+  X.fillStyle = bg; X.fillRect(0, 0, W, H);
+
+  if (stIdx === 2) drawViolin(730, 355, 0, 0.16);
+
+  // Ambient vignette
+  const vig = X.createRadialGradient(450, 300, 150, 450, 300, 520);
+  vig.addColorStop(0, 'transparent'); vig.addColorStop(1, 'rgba(0,0,0,0.45)');
+  X.fillStyle = vig; X.fillRect(0, 0, W, H);
+
+  X.save(); X.globalAlpha = stFa;
+  X.fillStyle = P.cream; X.font = '21px Georgia, serif'; X.textAlign = 'center';
+  s.text.split('\n').forEach((l, i) => X.fillText(l, 450, 218 + i * 34));
+  const subY = 218 + s.text.split('\n').length * 34 + 26;
+  X.fillStyle = P.amber; X.font = 'italic 15.5px Georgia, serif';
+  X.fillText(s.sub, 450, subY);
+
+  // Navigation dots
+  STORY_D.forEach((_, i) => {
+    X.fillStyle = i === stIdx ? P.gold : 'rgba(200,148,40,0.2)';
+    X.beginPath(); X.arc(450 - (STORY_D.length-1)*14 + i*28, 508, 5, 0, 6.28); X.fill();
+  });
+
+  const p = 0.38 + Math.sin(frame * 0.062) * 0.38;
+  X.globalAlpha = stFa * p;
+  X.fillStyle = P.dust; X.font = '12.5px Georgia, serif';
+  X.fillText('click to continue', 450, 556);
+  X.restore();
+
+  drawCursor(mouse.x, mouse.y);
+  if (jClick) {
+    stFa = 0;
+    if (stIdx < STORY_D.length - 1) stIdx++;
+    else goTo(ST.ATTIC);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//   ATTIC — DISCOVERY SCENE
+// ══════════════════════════════════════════════════════════════
+let atItems, atFound, atMsg, atMsgT;
+
+function initAttic() {
+  atItems = [
+    { id:'vln', x:545, y:378, r:68, found:false, label:'Violin Case',
+      text:"A battered case. Brown leather worn at the corners.\n\nYour hands are shaking as you unclasp it." },
+    { id:'jnl', x:238, y:318, r:47, found:false, label:"Papá's Journal",
+      text:"His handwriting fills the pages—\nbowing notations, fingering charts,\npractice records from 1962." },
+    { id:'pho', x:708, y:252, r:40, found:false, label:'Old Photograph',
+      text:"A young man in Seville holding a violin.\nHe is maybe nineteen.\n\nHe looks exactly like you." },
+  ];
+  atFound = 0; atMsg = ''; atMsgT = 0;
+}
+
+function drawAttic() {
+  const bg = X.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#0a0806'); bg.addColorStop(1, '#1a0e0a');
+  X.fillStyle = bg; X.fillRect(0, 0, W, H);
+
+  // Dust shaft of light
+  const shaft = X.createRadialGradient(450, -20, 0, 450, -20, 440);
+  shaft.addColorStop(0, 'rgba(202,168,92,0.15)'); shaft.addColorStop(1, 'transparent');
+  X.fillStyle = shaft; X.fillRect(0, 0, W, H);
+
+  // Dust motes
+  if (frame % 6 === 0) PTCLS.push(new Dot(
+    Math.random() * W, Math.random() * 290,
+    (Math.random() - 0.5) * 0.28, Math.random() * 0.18,
+    'rgba(218,192,148,0.72)', 145 + Math.random() * 60, 1.2
+  ));
+
+  // Header
+  X.fillStyle = P.amber; X.font = 'italic 13.5px Georgia, serif'; X.textAlign = 'center';
+  X.fillText('~ The Attic · Seville · December ~', 450, 36);
+  X.fillStyle = P.cream; X.font = '18px Georgia, serif';
+  X.fillText('Explore the room', 450, 62);
+
+  // Items
+  atItems.forEach(it => {
+    const hov = Math.hypot(mouse.x - it.x, mouse.y - it.y) < it.r && !it.found;
+    X.save(); X.translate(it.x, it.y);
+    if (it.found) X.globalAlpha = 0.2;
+    if (hov) { X.shadowColor = P.gold; X.shadowBlur = 22; }
+
+    if (it.id === 'vln') {
+      drawViolin(0, -12, 0, it.found ? 0.16 : 0.72);
+    } else if (it.id === 'jnl') {
+      X.fillStyle = it.found ? '#1c1008' : '#6c4222';
+      X.fillRect(-24, -33, 48, 63);
+      X.strokeStyle = it.found ? '#2a1808' : P.amber; X.lineWidth = 1.5;
+      X.strokeRect(-24, -33, 48, 63);
+      if (!it.found) {
+        X.strokeStyle = 'rgba(200,148,62,0.26)'; X.lineWidth = 0.5;
+        for (let j = 0; j < 5; j++) { X.beginPath(); X.moveTo(-17, -18+j*12); X.lineTo(17, -18+j*12); X.stroke(); }
+      }
+    } else {
+      X.fillStyle = it.found ? '#181108' : '#d2ba84';
+      X.fillRect(-24, -30, 48, 58);
+      X.strokeStyle = it.found ? '#281808' : '#9c7432'; X.lineWidth = 1.5;
+      X.strokeRect(-24, -30, 48, 58);
+      if (!it.found) {
+        X.fillStyle = '#8c6a42'; X.beginPath(); X.arc(0, -10, 9, 0, 6.28); X.fill();
+        X.fillRect(-7, 0, 14, 20);
+      }
+    }
+
+    if (hov && !it.found) {
+      X.shadowBlur = 0; X.fillStyle = P.cream;
+      X.font = '11.5px Georgia, serif'; X.textAlign = 'center';
+      X.fillText(it.label, 0, it.r + 16);
+    }
+    X.restore();
+
+    if (hov && jClick && !it.found) {
+      it.found = true; atFound++;
+      atMsg = it.text; atMsgT = 220;
+      burst(it.x, it.y, P.gold, 8);
+      burst(it.x, it.y, P.cream, 3, 'note');
+      playChime(440 + atFound * 110, 0.4);
+    }
+  });
+
+  // Message box
+  if (atMsgT > 0) {
+    const a = Math.min(1, atMsgT / 30);
+    X.save(); X.globalAlpha = a;
+    X.shadowColor = 'rgba(0,0,0,0.5)'; X.shadowBlur = 15; X.shadowOffsetY = 4;
+    X.fillStyle = 'rgba(4,2,10,0.9)'; rrect(72, 424, 756, 142, 7); X.fill();
+    X.shadowBlur = 0; X.shadowOffsetY = 0;
+    X.strokeStyle = P.amber; X.lineWidth = 1.2; rrect(72, 424, 756, 142, 7); X.stroke();
+    X.fillStyle = P.cream; X.font = 'italic 15.5px Georgia, serif'; X.textAlign = 'center';
+    atMsg.split('\n').forEach((l, i) => X.fillText(l, 450, 460 + i * 28));
+    X.restore(); atMsgT--;
+  }
+
+  // Progress
+  if (atFound < 3) {
+    const p = 0.35 + Math.sin(frame * 0.052) * 0.32;
+    X.globalAlpha = p; X.fillStyle = P.dust;
+    X.font = '13px Georgia, serif'; X.textAlign = 'center';
+    X.fillText(`${atFound} / 3 items discovered`, 450, 560); X.globalAlpha = 1;
+  }
+
+  if (atFound >= 3) {
+    if (btn('Begin Lessons →', 325, 500, 250, 50)) { playChime(554, 0.3); goTo(ST.JOURNAL); }
+  }
+
+  drawCursor(mouse.x, mouse.y);
+}
+
+// ══════════════════════════════════════════════════════════════
+//   JOURNAL — LORE READING
+// ══════════════════════════════════════════════════════════════
+let jFa = 0;
+
+function drawJournal() {
+  if (jFa < 1) jFa = Math.min(1, jFa + 0.038);
+  const bg = X.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, '#1a1008'); bg.addColorStop(1, '#0a0806');
+  X.fillStyle = bg; X.fillRect(0, 0, W, H);
+
+  const j = JOURNAL_D[Math.min(lessonIdx, JOURNAL_D.length - 1)];
+  X.save(); X.globalAlpha = jFa;
+
+  // Page drop shadow
+  X.shadowColor = 'rgba(0,0,0,0.65)'; X.shadowBlur = 22; X.shadowOffsetX = 5; X.shadowOffsetY = 7;
+  X.fillStyle = '#f2dcab'; rrect(136, 50, 628, 484, 5); X.fill();
+  X.shadowBlur = 0; X.shadowOffsetX = 0; X.shadowOffsetY = 0;
+
+  // Ruled lines
+  X.strokeStyle = 'rgba(148,108,58,0.14)'; X.lineWidth = 0.5;
+  for (let i = 0; i < 22; i++) { X.beginPath(); X.moveTo(156, 126+i*17); X.lineTo(744, 126+i*17); X.stroke(); }
+
+  // Red margin
+  X.strokeStyle = 'rgba(175,58,58,0.11)'; X.lineWidth = 1;
+  X.beginPath(); X.moveTo(181, 58); X.lineTo(181, 522); X.stroke();
+
+  // Content
+  X.textAlign = 'left';
+  X.fillStyle = '#6a3020'; X.font = '13px Georgia, serif'; X.fillText(j.week, 192, 90);
+  X.fillStyle = '#3c1a08'; X.font = 'bold italic 22px Georgia, serif'; X.fillText(j.title, 192, 118);
+  X.fillStyle = '#261006'; X.font = '14.5px Georgia, serif';
+  wrapText(j.body, 192, 150, 542, 21);
+
+  X.textAlign = 'right'; X.fillStyle = '#6a3020';
+  X.font = 'italic 13px Georgia, serif'; X.fillText('— E.V.', 742, 514);
+  X.restore();
+
+  if (jFa > 0.88 && btn('Begin Practice Session', 316, 546, 268, 48)) { playChime(440, 0.3); goTo(ST.PRACTICE); }
+
+  drawCursor(mouse.x, mouse.y);
+}
+
+// ══════════════════════════════════════════════════════════════
+//   PRACTICE — BOW & PRESSURE MECHANIC
+// ══════════════════════════════════════════════════════════════
+const LANES = [
+  { name: 'G', x: 268, col: P.G },
+  { name: 'D', x: 368, col: P.D },
+  { name: 'A', x: 468, col: P.A },
+  { name: 'E', x: 568, col: P.E },
+];
+const BOW_Y = 468, BOW_TOP = 442, BOW_BOT = 498;
+
+let pNotes, pScore, pMaxScore, pCombo, pBestCombo;
+let pResonance, pDone, pResults, pTimer;
+let pHint, pHintT, bowPhase, bowPressure, criticSz;
+let sFlash = 0, sFlashCol = '';
+
+class FallNote {
+  constructor(lane, delay) {
+    this.lane = lane; this.LD = LANES[lane];
+    this.x = this.LD.x; this.y = -30;
+    this.vy = 1.88 + lessonIdx * 0.48;
+    this.delay = delay; this.alive = false;
+    this.hit = false; this.missed = false;
+    this.qual = null; this.dt = 0; this.r = 19;
+    this.pulse = 0;
+  }
+  tick() {
+    if (!this.alive) return;
+    if (this.hit || this.missed) { this.dt++; this.r *= 0.93; return; }
+    this.y += this.vy;
+    this.pulse += 0.12;
+    if (this.y > BOW_BOT + 28) {
+      this.missed = true; this.qual = 'miss';
+      pCombo = 0; pScore -= 5;
+      criticSz = Math.min(138, criticSz + 12);
+      pResonance = Math.max(0, pResonance - 7);
+      burst(this.x, BOW_Y, '#565656', 4);
+      triggerHint();
+    }
+  }
+  inZone() { return !this.hit && !this.missed && this.y >= BOW_TOP && this.y <= BOW_BOT; }
+  get dead() { return (this.hit || this.missed) && (this.dt > 40 || this.r < 0.3); }
+
+  draw() {
+    if (!this.alive) return;
+    X.save();
+    if (this.hit || this.missed) X.globalAlpha = Math.max(0, 1 - this.dt / 26);
+    X.translate(this.x, this.y);
+
+    // Approach glow
+    const gApproach = Math.max(0, (this.y - 160) / 320);
+    if (gApproach > 0 && !this.hit && !this.missed) {
+      X.shadowColor = this.LD.col; X.shadowBlur = 16 * gApproach;
+    }
+    // In-zone pulse
+    if (this.inZone()) {
+      X.shadowColor = '#fff'; X.shadowBlur = 8 + Math.sin(this.pulse) * 5;
+    }
+
+    X.beginPath(); X.arc(0, 0, this.r, 0, 6.28);
+    const qcol = { perfect: P.gold, good: '#38c262', poor: '#4882c8', miss: '#505050' };
+    X.fillStyle = (this.hit || this.missed) ? (qcol[this.qual] || this.LD.col) : this.LD.col;
+    X.fill();
+
+    X.fillStyle = 'rgba(255,255,255,0.92)';
+    X.font = `bold ${this.r * 0.88}px Georgia, serif`;
+    X.textAlign = 'center'; X.textBaseline = 'middle';
+    X.fillText(this.LD.name, 0, 0);
+
+    if (this.hit && this.dt < 22) {
+      const labels = { perfect: 'Pure!', good: 'Good', poor: 'Rough' };
+      X.shadowBlur = 0; X.font = 'bold 10px Georgia, serif'; X.fillStyle = '#fff';
+      X.fillText(labels[this.qual] || '', 0, -this.r - 10);
+    }
+    X.restore();
+  }
+}
+
+function triggerHint() {
+  if (pHintT > 65) return;
+  const hs = LESSON_D[lessonIdx].hints;
+  pHint = hs[Math.floor(Math.random() * hs.length)];
+  pHintT = 185;
+}
+
+function initPractice() {
+  const les = LESSON_D[lessonIdx];
+  pNotes = []; pScore = 0; pMaxScore = 0; pCombo = 0; pBestCombo = 0;
+  pResonance = 0; pDone = false; pResults = null; pTimer = 0;
+  pHintT = 0; bowPhase = 0; criticSz = 64; sFlash = 0;
+  pHint = les.hints[0]; pHintT = 210;
+
+  const beatF = Math.round(3600 / les.bpm);
+  les.seq.forEach((lane, i) => {
+    pNotes.push(new FallNote(lane, i * beatF + 58));
+    pMaxScore += 10;
+  });
+}
+
+function strikeNote(laneIdx) {
+  let best = null, bd = 999;
+  pNotes.forEach(n => {
+    if (n.lane === laneIdx && n.inZone()) {
+      const d = Math.abs(n.y - BOW_Y);
+      if (d < bd) { bd = d; best = n; }
+    }
+  });
+  if (!best) return;
+
+  const pq = Math.abs(bowPressure - 0.5); // 0=perfect centre, 0.5=extreme
+  let q;
+  if      (bd < 10 && pq < 0.13) { q = 'perfect'; pScore += 10; pResonance = Math.min(100, pResonance+10); criticSz = Math.max(18, criticSz-15); sFlash = 14; sFlashCol = 'rgba(255,198,48,0.1)'; }
+  else if (bd < 24 && pq < 0.27) { q = 'good';    pScore += 6;  pResonance = Math.min(100, pResonance+5);  criticSz = Math.max(18, criticSz-7);  }
+  else                            { q = 'poor';    pScore += 2;  pResonance = Math.max(0,   pResonance-2);  criticSz = Math.min(138, criticSz+3); }
+
+  best.hit = true; best.qual = q;
+  pCombo++; pBestCombo = Math.max(pBestCombo, pCombo);
+
+  const cc = { perfect: P.gold, good: '#38d265', poor: '#5082d2' }[q];
+  burst(best.x, BOW_Y, cc, 5);
+  if (q === 'perfect') burst(best.x, BOW_Y - 18, P.cream, 3, 'note');
+  if (pCombo % 4 === 0) triggerHint();
+  playString(laneIdx, q);
+}
+
+function drawBowCursor(mx, pressure) {
+  const cx = Math.max(218, Math.min(618, mx));
+  // Color bands: too light → blue, light → green, perfect → gold, heavy → orange, too heavy → red
+  const zones = [[0,0.2,'#2458e0'],[0.2,0.38,'#42b835'],[0.38,0.62,P.gold],[0.62,0.80,'#e07018'],[0.80,1,'#c82828']];
+  let col = P.gold;
+  for (const [lo,hi,c] of zones) if (pressure >= lo && pressure <= hi) { col = c; break; }
+
+  X.save();
+  X.strokeStyle = col; X.lineWidth = 2.8;
+  X.shadowColor = col; X.shadowBlur = 12;
+  X.beginPath(); X.moveTo(cx-65, BOW_Y-4); X.lineTo(cx+65, BOW_Y-4); X.stroke();
+
+  // Bow hairs (more hairs = more pressure)
+  const hairN = Math.floor(4 + pressure * 10);
+  X.strokeStyle = `rgba(255,255,255,${0.2 + pressure * 0.4})`; X.lineWidth = 0.55; X.shadowBlur = 0;
+  for (let i = 0; i < hairN; i++) {
+    const hx = cx - 61 + (122 / Math.max(1, hairN-1)) * i;
+    X.beginPath(); X.moveTo(hx, BOW_Y-4); X.lineTo(hx, BOW_Y+5); X.stroke();
+  }
+  X.restore();
+}
+
+function drawPressureGauge(pressure) {
+  const gx = 655, gy = 445, gw = 22, gh = 110;
+  X.fillStyle = 'rgba(0,0,0,0.52)'; X.fillRect(gx, gy, gw, gh);
+  // Green zone
+  X.fillStyle = 'rgba(32,162,42,0.24)'; X.fillRect(gx, gy+gh*0.3, gw, gh*0.4);
+  // Indicator
+  const iy = gy + pressure * gh;
+  const inZone = pressure > 0.22 && pressure < 0.78;
+  X.fillStyle = inZone ? '#44d248' : '#d24422';
+  X.fillRect(gx - 4, iy - 4, gw + 8, 8);
+  X.strokeStyle = 'rgba(198,152,48,0.42)'; X.lineWidth = 1; X.strokeRect(gx, gy, gw, gh);
+  X.fillStyle = 'rgba(198,152,48,0.58)'; X.font = '9px Georgia, serif'; X.textAlign = 'center';
+  X.fillText('BOW', gx+gw/2, gy-8);
+  // Label
+  const label = pressure < 0.2 ? 'too light' : pressure > 0.8 ? 'too heavy' : pressure > 0.35 && pressure < 0.65 ? 'perfect' : 'good';
+  X.fillStyle = inZone ? 'rgba(68,210,72,0.6)' : 'rgba(210,68,34,0.5)';
+  X.font = '8px Georgia, serif'; X.fillText(label, gx+gw/2, gy+gh+13);
+}
+
+function drawCritic() {
+  const cx = 113, cy = 210, sz = Math.max(14, criticSz);
+  const alpha = Math.min(0.6, sz / 228);
+  X.save(); X.globalAlpha = alpha;
+  const cg = X.createRadialGradient(cx, cy, 0, cx, cy, sz);
+  cg.addColorStop(0, 'rgba(136,18,22,0.9)'); cg.addColorStop(0.62, 'rgba(82,6,12,0.44)'); cg.addColorStop(1, 'transparent');
+  X.fillStyle = cg; X.beginPath(); X.arc(cx, cy, sz, 0, 6.28); X.fill();
+  // Eyes
+  X.fillStyle = 'rgba(218,28,28,0.92)';
+  X.beginPath(); X.ellipse(cx-sz*.19, cy-sz*.07, sz*.068, sz*.034, 0, 0, 6.28); X.fill();
+  X.beginPath(); X.ellipse(cx+sz*.19, cy-sz*.07, sz*.068, sz*.034, 0, 0, 6.28); X.fill();
+  X.restore();
+
+  X.globalAlpha = alpha * 0.72;
+  X.fillStyle = P.critic; X.font = 'italic 9.5px Georgia, serif'; X.textAlign = 'center';
+  X.fillText('the Critic', cx, cy + sz + 11); X.globalAlpha = 1;
+
+  // Occasional whispers
+  if (pCombo === 0 && frame % 192 === 0 && sz > 55) {
+    const msgs = ['too old', 'why bother', 'stop now', "you can't"];
+    PTCLS.push({
+      x: cx + (Math.random()-.5)*30, y: cy - sz/2,
+      vx: (Math.random()-.5)*.22, vy: -0.42, life: 105, ml: 105,
+      msg: msgs[Math.floor(Math.random()*msgs.length)],
+      tick() { this.x+=this.vx; this.y+=this.vy; this.life--; },
+      draw() {
+        X.save(); X.globalAlpha = this.life/this.ml*0.54;
+        X.fillStyle = '#bf1e1e'; X.font = 'italic 10px Georgia, serif'; X.textAlign = 'center';
+        X.fillText(this.msg, this.x, this.y); X.restore();
+      },
+      get dead() { return this.life <= 0; }
+    });
+  }
+}
+
+function drawPracticeHUD() {
+  // Resonance bar
+  X.fillStyle = 'rgba(0,0,0,0.55)'; X.fillRect(636, 14, 246, 20);
+  const rg = X.createLinearGradient(638, 0, 880, 0);
+  rg.addColorStop(0, '#b85812'); rg.addColorStop(1, P.gold);
+  X.fillStyle = rg; X.fillRect(637, 15, 244 * (pResonance / 100), 18);
+  X.strokeStyle = P.amber; X.lineWidth = 1; X.strokeRect(636, 14, 246, 20);
+  X.fillStyle = P.cream; X.font = '10px Georgia, serif'; X.textAlign = 'center';
+  X.fillText(`Resonance  ${Math.round(pResonance)}%`, 759, 28);
+
+  X.fillStyle = P.gold; X.font = 'bold 16px Georgia, serif'; X.textAlign = 'right';
+  X.fillText(`${Math.max(0, pScore)} pts`, 884, 52);
+  if (pCombo > 1) {
+    X.fillStyle = P.amber; X.font = `bold ${12+Math.min(pCombo,10)}px Georgia, serif`;
+    X.fillText(`${pCombo}× combo`, 884, 72);
+  }
+}
+
+function drawResults() {
+  const r = pResults;
+  X.fillStyle = 'rgba(0,0,0,0.91)'; X.fillRect(0, 0, W, H);
+  drawViolin(710, 390, 0, 0.12);
+
+  X.fillStyle = P.cream; X.font = 'bold 27px Georgia, serif'; X.textAlign = 'center';
+  X.fillText('Session Complete', 450, 112);
+
+  const stars = r.pct > 0.78 ? 3 : r.pct > 0.5 ? 2 : 1;
+  for (let i = 0; i < 3; i++) {
+    X.fillStyle = i < stars ? P.gold : 'rgba(200,152,40,0.14)';
+    X.font = '37px serif'; X.fillText('★', 394 + i*58, 168);
+  }
+  const grades = ['"Every scratch is progress."', '"Finding the sound."', '"Pure and resonant."'];
+  X.fillStyle = P.amber; X.font = '15px Georgia, serif';
+  X.fillText(`Sofia says: ${grades[stars-1]}`, 450, 215);
+  X.fillStyle = P.cream; X.font = '13px Georgia, serif';
+  X.fillText(`Score: ${Math.max(0,r.score)} / ${r.max}  ·  Best Combo: ${r.combo}×`, 450, 255);
+  X.fillText(`Resonance: ${Math.round(r.res)}%`, 450, 278);
+
+  if (btn('Enter the Soundscape →', 256, 334, 238, 48)) { playChime(528, 0.5); goTo(ST.SOUND); }
+}
+
+function drawPractice() {
+  // BG
+  const bg = X.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#080514'); bg.addColorStop(1, '#100812');
+  X.fillStyle = bg; X.fillRect(0, 0, W, H);
+
+  // Oscillating bow pressure
+  bowPhase += 0.024 + lessonIdx * 0.0042;
+  bowPressure = (Math.sin(bowPhase) + 1) / 2;
+
+  // Screen flash on perfect
+  if (sFlash > 0) { X.fillStyle = sFlashCol; X.fillRect(0,0,W,H); sFlash--; }
+
+  // Lane BGs and strings
+  LANES.forEach((l, i) => {
+    const lg = X.createLinearGradient(l.x-42, 0, l.x+42, 0);
+    lg.addColorStop(0, 'transparent');
+    lg.addColorStop(0.5, l.col + '18');
+    lg.addColorStop(1, 'transparent');
+    X.fillStyle = lg; X.fillRect(l.x-42, 70, 84, 410);
+
+    X.strokeStyle = l.col; X.lineWidth = 1.6; X.globalAlpha = 0.52;
+    X.beginPath(); X.moveTo(l.x, 70); X.lineTo(l.x, BOW_Y); X.stroke();
+    X.globalAlpha = 1;
+
+    X.fillStyle = l.col; X.font = 'bold 15px Georgia, serif'; X.textAlign = 'center';
+    X.fillText(l.name, l.x, 62);
+    X.fillStyle = 'rgba(200,165,82,0.33)'; X.font = '11px Georgia, serif';
+    X.fillText(['A','S','D','F'][i], l.x, 556);
+  });
+
+  // Bow zone shimmer
+  const bz = X.createLinearGradient(0, BOW_TOP, 0, BOW_BOT);
+  bz.addColorStop(0, 'transparent'); bz.addColorStop(0.5, 'rgba(198,152,44,0.08)'); bz.addColorStop(1, 'transparent');
+  X.fillStyle = bz; X.fillRect(196, BOW_TOP, 440, BOW_BOT-BOW_TOP);
+
+  // Dashed bow line
+  X.strokeStyle = 'rgba(198,152,44,0.42)'; X.lineWidth = 1;
+  X.setLineDash([4,5]);
+  X.beginPath(); X.moveTo(196, BOW_Y); X.lineTo(636, BOW_Y); X.stroke();
+  X.setLineDash([]);
+
+  drawBowCursor(mouse.x, bowPressure);
+  drawPressureGauge(bowPressure);
+
+  // Draw notes
+  pNotes.forEach(n => n.draw());
+
+  // Update
+  if (!pDone) {
+    pTimer++;
+    pNotes.forEach(n => { if (!n.alive && pTimer >= n.delay) n.alive = true; n.tick(); });
+    pNotes = pNotes.filter(n => !n.dead);
+    criticSz += Math.sin(frame * 0.04) * 0.22;
+    if (pHintT > 0) pHintT--;
+    if (pTimer % 288 === 0 && Math.random() < 0.65) triggerHint();
+    if (pTimer > 95 && pNotes.length === 0) {
+      pDone = true;
+      pResults = { score: pScore, max: pMaxScore, pct: Math.max(0, pScore/pMaxScore), combo: pBestCombo, res: pResonance };
+    }
+  }
+
+  // Sofia's hint
+  if (pHintT > 0) {
+    const a = Math.min(1, pHintT / 28);
+    X.save(); X.globalAlpha = a;
+    X.fillStyle = 'rgba(0,0,0,0.8)'; rrect(626, 195, 258, 92, 7); X.fill();
+    X.strokeStyle = P.amber; X.lineWidth = 1; rrect(626, 195, 258, 92, 7); X.stroke();
+    X.fillStyle = P.amber; X.font = '12px Georgia, serif'; X.textAlign = 'left'; X.fillText('Sofia:', 642, 214);
+    X.fillStyle = P.cream; X.font = 'italic 13px Georgia, serif';
+    wrapText(`"${pHint}"`, 642, 232, 228, 17);
+    X.restore();
+  }
+
+  drawCritic();
+
+  // Lesson info
+  X.fillStyle = 'rgba(198,150,42,0.9)'; X.font = 'bold 13.5px Georgia, serif'; X.textAlign = 'left';
+  X.fillText(LESSON_D[lessonIdx].title, 16, 25);
+  X.fillStyle = 'rgba(170,125,38,0.5)'; X.font = '11px Georgia, serif';
+  X.fillText(LESSON_D[lessonIdx].sub, 16, 43);
+
+  drawPracticeHUD();
+  if (pDone && pResults) drawResults();
+  drawCursor(mouse.x, mouse.y);
+}
+
+// ══════════════════════════════════════════════════════════════
+//   SOUNDSCAPE — MUSICAL EXPLORATION WORLD
+// ══════════════════════════════════════════════════════════════
+let SP, sSCR, sFRAGS, sCOLL, sDONE;
+let sDLG, sDLGT, sSPIR_A, sBGF;
+let sSTARS, sPLATS, sSPIRIT;
+
+function initSoundscape() {
+  const wd = WORLD_D[lessonIdx] || WORLD_D[0];
+  SP    = { x:118, y:342, vx:0, vy:0, gr:false, fr:true, wf:0, jSq:0 };
+  sSCR  = 0; sCOLL = 0; sDONE = false;
+  sDLG  = ''; sDLGT = 0; sSPIR_A = 0; sBGF = 0;
+
+  sPLATS = [
+    { x:0,    y:410, w:322, h:18, t:'g' },
+    { x:385,  y:358, w:208, h:14, t:'s' },
+    { x:645,  y:305, w:168, h:14, t:'s' },
+    { x:862,  y:253, w:208, h:14, t:'s' },
+    { x:1118, y:314, w:190, h:14, t:'s' },
+    { x:1360, y:370, w:252, h:18, t:'g' },
+    { x:1668, y:312, w:165, h:14, t:'s' },
+    { x:1882, y:258, w:208, h:14, t:'s' },
+    { x:2115, y:325, w:318, h:18, t:'g' },
+    { x:2200, y:198, w:198, h:14, t:'h' },
+  ];
+
+  sFRAGS = wd.frags.map((text, i) => ({
+    x: [460,1168,1718][i], y: [302,262,254][i], text, c: false
+  }));
+
+  sSPIRIT = { x: 2300, y: 148, text: wd.spirit };
+
+  sSTARS = Array.from({length:138}, () => ({
+    x: Math.random()*2750, y: Math.random()*438, r: Math.random()*1.95, tw: Math.random()*6.28
+  }));
+}
+
+function tickSoundscape() {
+  if (sDONE) return;
+  sBGF++;
+
+  const RIGHT = keys['ArrowRight'] || keys['KeyD'];
+  const LEFT  = keys['ArrowLeft']  || keys['KeyA'];
+  const JUMP  = keys['ArrowUp']    || keys['Space'] || keys['KeyW'];
+
+  if (RIGHT) { SP.vx = 3.25; SP.fr = true;  SP.wf += 0.192; }
+  else if (LEFT) { SP.vx = -3.25; SP.fr = false; SP.wf += 0.192; }
+  else SP.vx *= 0.7;
+
+  if (JUMP && SP.gr) {
+    SP.vy = -10.4; SP.gr = false; SP.jSq = 1;
+    burst(SP.x, SP.y+12, P.gold, 4);
+    playChime(528, 0.12);
+  }
+
+  SP.vy = Math.min(SP.vy + 0.4, 14);
+  SP.x += SP.vx; SP.y += SP.vy; SP.gr = false;
+  if (SP.jSq > 0) SP.jSq *= 0.85;
+
+  sPLATS.forEach(pl => {
+    const wx = pl.x - sSCR;
+    if (SP.x+15 > wx && SP.x-15 < wx+pl.w &&
+        SP.y+22 > pl.y && SP.y+22 < pl.y+pl.h+Math.max(0,SP.vy)+3 && SP.vy >= 0) {
+      SP.y = pl.y-22; SP.vy = 0; SP.gr = true; SP.jSq = 0;
+    }
+  });
+  if (SP.y > 580) { SP.y = 580; SP.vy = 0; SP.gr = true; }
+
+  // Scroll
+  if (SP.x > 548) { sSCR += SP.x - 548; SP.x = 548; }
+  if (SP.x < 92 && sSCR > 0) { sSCR = Math.max(0, sSCR-(92-SP.x)); SP.x = 92; }
+
+  // Fragment collection
+  sFRAGS.forEach(f => {
+    if (f.c) return;
+    if (Math.hypot(SP.x-(f.x-sSCR), SP.y-f.y) < 30) {
+      f.c = true; sCOLL++;
+      sDLG = f.text; sDLGT = 235;
+      burst(f.x-sSCR, f.y, P.gold, 9, 'note');
+      playChime(660 + sCOLL*80, 0.5);
+    }
+  });
+  if (sDLGT > 0) sDLGT--;
+
+  // Spirit approach
+  if (sSPIRIT) {
+    const sx = sSPIRIT.x - sSCR;
+    const d  = Math.hypot(SP.x-sx, SP.y-sSPIRIT.y);
+    sSPIR_A = d < 88 ? Math.min(1, sSPIR_A+0.024) : Math.max(0, sSPIR_A-0.016);
+    if (d < 40 && sCOLL >= 3 && !sDONE) {
+      sDONE = true; sDLG = sSPIRIT.text; sDLGT = 348;
+      burst(sx, sSPIRIT.y, P.spirit, 10, 'note');
+      playChime(880, 0.8);
+    }
+  }
+}
+
+function drawSoundPlayer() {
+  const { x, y, vx, gr, fr, wf, jSq } = SP;
+  X.save(); X.translate(x, y); if (!fr) X.scale(-1,1);
+  const wb = gr ? Math.sin(wf)*2.5 : 0;
+  const sq = 1 + jSq * 0.22;
+  X.scale(1/sq, sq);
+  X.fillStyle = '#c8a872';
+
+  // Legs
+  if (gr && Math.abs(vx) > 0.5) {
+    const ls = Math.sin(wf)*7;
+    X.save(); X.translate(-4,14); X.rotate(ls*0.048); X.fillRect(0,0,5,13); X.restore();
+    X.save(); X.translate(1,14);  X.rotate(-ls*0.048); X.fillRect(0,0,5,13); X.restore();
+  } else { X.fillRect(-5,14,5,14); X.fillRect(1,14,5,14); }
+
+  X.fillRect(-9,-4+wb,18,18);
+  X.beginPath(); X.arc(0,-13+wb,9,0,6.28); X.fill();
+  X.fillStyle = '#6a2e18'; X.beginPath(); X.arc(0,-16+wb,7,Math.PI,6.28); X.fill();
+
+  // Violin silhouette she carries
+  X.strokeStyle = '#8a5022'; X.lineWidth = 1.9;
+  X.beginPath(); X.moveTo(9,-3+wb); X.lineTo(9,10+wb); X.stroke();
+  X.restore();
+}
+
+function drawSpirit(sx, sy) {
+  const fl = Math.sin(sBGF*0.04)*8;
+  X.save(); X.globalAlpha = sSPIR_A;
+
+  const sg = X.createRadialGradient(sx, sy+fl, 0, sx, sy+fl, 56);
+  sg.addColorStop(0, 'rgba(200,184,254,0.6)'); sg.addColorStop(1, 'transparent');
+  X.fillStyle = sg; X.beginPath(); X.arc(sx, sy+fl, 56, 0, 6.28); X.fill();
+
+  X.fillStyle = 'rgba(214,204,255,0.75)';
+  X.beginPath(); X.ellipse(sx, sy+10+fl, 10, 20, 0, 0, 6.28); X.fill();
+  X.beginPath(); X.arc(sx, sy-12+fl, 12, 0, 6.28); X.fill();
+
+  X.strokeStyle = 'rgba(214,204,255,0.72)'; X.lineWidth = 2;
+  X.beginPath(); X.moveTo(sx-10, sy+5+fl); X.lineTo(sx-28, sy+fl); X.stroke();
+  X.beginPath(); X.moveTo(sx+10, sy+5+fl); X.lineTo(sx+26, sy-4+fl); X.stroke();
+
+  // Spirit's violin
+  X.strokeStyle = 'rgba(200,168,98,0.62)'; X.lineWidth = 1.2;
+  X.beginPath(); X.ellipse(sx-31, sy-2+fl, 6, 11, 0.3, 0, 6.28); X.stroke();
+
+  if (sBGF % 13 === 0) PTCLS.push(new NoteGlyph(sx+(Math.random()-.5)*28, sy+fl, 'rgba(200,184,255,0.9)'));
+  X.restore();
+}
+
+function drawSoundscape() {
+  const wd = WORLD_D[lessonIdx] || WORLD_D[0];
+  const bgs = [['#060c1e','#0a0418'],['#08061e','#140832'],['#0a0618','#180a2e']];
+  const [b0, b1] = bgs[lessonIdx % 3];
+  const bg = X.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, b0); bg.addColorStop(1, b1);
+  X.fillStyle = bg; X.fillRect(0, 0, W, H);
+
+  // Parallax stars
+  sSTARS.forEach(st => {
+    st.tw += 0.015;
+    const sx = ((st.x - sSCR * 0.24) % 2750 + 2750) % 2750 * (W / 2750);
+    X.globalAlpha = 0.18 + Math.sin(st.tw) * 0.26;
+    X.fillStyle = P.cream; X.beginPath(); X.arc(sx, st.y, st.r, 0, 6.28); X.fill();
+  });
+  X.globalAlpha = 1;
+
+  // Ambient note glow drift
+  if (sBGF % 24 === 0) PTCLS.push(new NoteGlyph(Math.random()*W, H, ['#7252aa','#5068b2',P.gold][Math.floor(Math.random()*3)]));
+
+  // Background staff lines
+  for (let i = 0; i < 5; i++) {
+    X.strokeStyle = `rgba(86,66,138,${0.062+i*0.009})`; X.lineWidth = 0.5;
+    X.beginPath(); X.moveTo(0, 180+i*13); X.lineTo(W, 180+i*13); X.stroke();
+  }
+
+  // Platforms
+  sPLATS.forEach(pl => {
+    const wx = pl.x - sSCR;
+    if (wx+pl.w < -55 || wx > 960) return;
+
+    if (pl.t === 'g') {
+      X.fillStyle = 'rgba(50,30,92,0.9)'; X.fillRect(wx, pl.y, pl.w, pl.h);
+      X.strokeStyle = 'rgba(102,76,166,0.72)'; X.lineWidth = 1; X.strokeRect(wx, pl.y, pl.w, pl.h);
+    } else if (pl.t === 's') {
+      X.strokeStyle = 'rgba(188,172,254,0.64)'; X.lineWidth = pl.h; X.lineCap = 'round';
+      X.beginPath(); X.moveTo(wx, pl.y+pl.h/2); X.lineTo(wx+pl.w, pl.y+pl.h/2); X.stroke();
+      const nc = Math.floor(pl.w/36);
+      X.fillStyle = 'rgba(188,172,254,0.3)'; X.font = '13px serif'; X.textAlign = 'center';
+      for (let i = 0; i < nc; i++) X.fillText('♩', wx+18+i*36, pl.y-5);
+    } else {
+      const gp = 0.4 + Math.sin(sBGF*0.052)*0.3;
+      X.strokeStyle = `rgba(188,172,254,${gp})`; X.lineWidth = pl.h; X.lineCap = 'round';
+      X.shadowColor = '#9878f2'; X.shadowBlur = 18;
+      X.beginPath(); X.moveTo(wx, pl.y+pl.h/2); X.lineTo(wx+pl.w, pl.y+pl.h/2); X.stroke();
+      X.shadowBlur = 0;
+    }
+  });
+
+  // Memory fragments
+  sFRAGS.forEach(f => {
+    if (f.c) return;
+    const fx = f.x - sSCR;
+    if (fx < -38 || fx > 948) return;
+    const bob = Math.sin(sBGF*0.057 + f.x*0.01)*6;
+    const gp  = 0.5 + Math.sin(sBGF*0.092)*0.46;
+    X.save(); X.globalAlpha = gp;
+    X.shadowColor = P.gold; X.shadowBlur = 16;
+    X.fillStyle = P.gold; X.font = '27px serif'; X.textAlign = 'center';
+    X.fillText('♬', fx, f.y+bob); X.restore();
+    X.fillStyle = 'rgba(200,165,62,0.44)'; X.font = '9px Georgia, serif'; X.textAlign = 'center';
+    X.fillText('memory', fx, f.y+bob+20);
+  });
+
+  // Spirit
+  if (sSPIRIT && sSPIR_A > 0) {
+    const sx = sSPIRIT.x - sSCR;
+    if (sx > -60 && sx < 960) drawSpirit(sx, sSPIRIT.y);
+  }
+
+  drawSoundPlayer();
+
+  // Dialog box
+  if (sDLGT > 0) {
+    const da = Math.min(1, Math.min(sDLGT, 32)/32);
+    X.save(); X.globalAlpha = da;
+    X.shadowColor='rgba(0,0,0,0.4)'; X.shadowBlur=12; X.shadowOffsetY=4;
+    X.fillStyle = 'rgba(4,2,12,0.87)'; rrect(86,18,728,118,8); X.fill();
+    X.shadowBlur=0; X.shadowOffsetY=0;
+    X.strokeStyle = 'rgba(132,106,220,0.84)'; X.lineWidth = 1.2; rrect(86,18,728,118,8); X.stroke();
+    X.fillStyle = P.cream; X.font = 'italic 15px Georgia, serif'; X.textAlign = 'center';
+    sDLG.split('\n').forEach((l,i) => X.fillText(l, 450, 63+i*24)); X.restore();
+  }
+
+  // HUD
+  X.fillStyle = 'rgba(186,170,228,0.72)'; X.font='13px Georgia,serif'; X.textAlign='left';
+  X.fillText(`Memories: ${sCOLL} / 3`, 16, 28);
+  X.fillStyle = 'rgba(136,116,196,0.6)'; X.font='italic 12px Georgia,serif'; X.textAlign='center';
+  X.fillText(wd.title, 450, 28);
+  X.fillStyle='rgba(86,66,138,0.52)'; X.font='11px Georgia,serif'; X.textAlign='right';
+  X.fillText('← → move   ↑ / Space  jump', 884, 578);
+
+  // Continue button
+  if (sDONE && sDLGT < 68) {
+    const isLast = lessonIdx >= LESSON_D.length - 1;
+    const lbl = isLast ? 'Hear the Last Note →' : 'Continue the Journey →';
+    if (btn(lbl, 290, 488, 320, 52)) {
+      lessonIdx++;
+      if (lessonIdx >= LESSON_D.length) goTo(ST.FINALE);
+      else { jFa = 0; goTo(ST.JOURNAL); }
+    }
+  }
+
+  drawCursor(mouse.x, mouse.y);
+}
+
+// ══════════════════════════════════════════════════════════════
+//   FINALE
+// ══════════════════════════════════════════════════════════════
+const FINALE_L = [
+  "Six months later.",
+  "Elena played her father's melody\nin full, for the first time.",
+  "She stopped twice.\nHer intonation wandered.",
+  "But the notes rang true.",
+  "And somewhere,\nacross whatever space\nthe dead and the living share—",
+  "she was certain\nsomeone was listening.",
+  "~ fin ~"
+];
+let finF=0, finFa=0, finLine=0, finLT=0;
+
+function drawFinale() {
+  finF++;
+  if (finFa < 1) finFa = Math.min(1, finFa + 0.012);
+
+  const bg = X.createRadialGradient(450, 300, 0, 450, 300, 570);
+  bg.addColorStop(0, '#100a22'); bg.addColorStop(1, P.void);
+  X.fillStyle = bg; X.fillRect(0, 0, W, H);
+
+  if (finF % 9 === 0) PTCLS.push(new NoteGlyph(
+    175 + Math.random()*550, H,
+    [P.gold, 'rgba(198,182,255,0.92)', P.amber][Math.floor(Math.random()*3)]
+  ));
+
+  drawViolin(450, 335, Math.sin(finF*.0068)*.017, 0.24 + Math.sin(finF*.0088)*.08);
+
+  finLT++;
+  if (finLT > 128 && finLine < FINALE_L.length-1) { finLine++; finLT=0; }
+
+  for (let i = 0; i <= finLine; i++) {
+    const age = finLine - i;
+    X.globalAlpha = finFa * Math.max(0.07, 1 - age*0.23);
+    const isNow  = i === finLine;
+    const isLast = FINALE_L[i].includes('~');
+    X.fillStyle = isNow ? P.cream : P.dust;
+    X.font = `${isLast?'bold ':isNow?'italic ':''}${Math.max(12,20-age)}px Georgia, serif`;
+    X.textAlign = 'center';
+    FINALE_L[i].split('\n').forEach((l,j) => X.fillText(l, 450, 112 + i*65 + j*27 - finLine*5));
+  }
+  X.globalAlpha = 1;
+
+  if (finLine >= FINALE_L.length-1 && finLT > 128) {
+    if (btn('Play Again', 346, 534, 208, 45)) {
+      lessonIdx=0; stIdx=0; stFa=0; jFa=0;
+      finF=0; finFa=0; finLine=0; finLT=0; PTCLS=[];
+      goTo(ST.TITLE);
+    }
+  }
+  drawCursor(mouse.x, mouse.y);
+}
+
+// ─── STATE ENTER HOOK ────────────────────────────────────────
+function enterState(s) {
+  if (s === ST.TITLE)    { frame = 0; titleEaseIn = 0; }
+  if (s === ST.STORY)    { stIdx = 0; stFa = 0; }
+  if (s === ST.ATTIC)    initAttic();
+  if (s === ST.JOURNAL)  jFa = 0;
+  if (s === ST.PRACTICE) initPractice();
+  if (s === ST.SOUND)    initSoundscape();
+  if (s === ST.FINALE)   { finF=0; finFa=0; finLine=0; finLT=0; }
+}
+
+// ─── MAIN LOOP ───────────────────────────────────────────────
+function loop() {
+  requestAnimationFrame(loop);
+  frame++;
+
+  jClick = pendingClick;
+  pendingClick = false;
+
+  PTCLS = PTCLS.filter(p => !p.dead);
+  PTCLS.forEach(p => p.tick());
+
+  X.clearRect(0, 0, W, H);
+
+  if      (GST === ST.TITLE)    drawTitle();
+  else if (GST === ST.STORY)    drawStory();
+  else if (GST === ST.ATTIC)    drawAttic();
+  else if (GST === ST.JOURNAL)  drawJournal();
+  else if (GST === ST.PRACTICE) drawPractice();
+  else if (GST === ST.SOUND)    { tickSoundscape(); drawSoundscape(); }
+  else if (GST === ST.FINALE)   drawFinale();
+
+  // Particles always on top
+  PTCLS.forEach(p => p.draw());
+
+  tickFade();
+  if (fadeA > 0) { X.fillStyle = `rgba(0,0,0,${fadeA})`; X.fillRect(0,0,W,H); }
+}
+
+enterState(ST.TITLE);
+loop();
+</script>
+</body>
+</html>
