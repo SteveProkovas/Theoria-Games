@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Strings of Memory</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#040101;display:flex;justify-content:center;align-items:center;overflow:hidden}
+canvas{display:block}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// STRINGS OF MEMORY  —  A Late Bloomer's Journey
+// Elena Vasquez, 40, finds her grandfather Mateo's violin in the attic.
+// He left her a note: "Play me Vivaldi's Summer someday."
+// ─────────────────────────────────────────────────────────────────────────────
+
+const W=900,H=600,CV=document.getElementById('c'),ctx=CV.getContext('2d');
+CV.width=W;CV.height=H;
+const resize=()=>{const s=Math.min(innerWidth/W,innerHeight/H);CV.style.width=W*s+'px';CV.style.height=H*s+'px';};
+window.addEventListener('resize',resize);resize();
+
+// ── GLOBAL TIMER ─────────────────────────────────────────────────────────────
+let tt=0;
+
+// ── AUDIO ─────────────────────────────────────────────────────────────────────
+let AC=null;
+function initAudio(){
+  if(AC)return;
+  AC=new(window.AudioContext||window.webkitAudioContext)();
+  const len=AC.sampleRate*1.4,buf=AC.createBuffer(2,len,AC.sampleRate);
+  for(let c=0;c<2;c++){const d=buf.getChannelData(c);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.8);}
+  AC._rv=AC.createConvolver();AC._rv.buffer=buf;AC._rv.connect(AC.destination);
+  AC._m=AC.createGain();AC._m.gain.value=0.72;AC._m.connect(AC.destination);
+}
+
+function playNote(freq,dur=0.5,vol=0.24,vibHz=0,vibCents=0){
+  if(!AC)return;
+  const now=AC.currentTime;
+  const o1=AC.createOscillator(),o2=AC.createOscillator();
+  const g=AC.createGain(),lp=AC.createBiquadFilter(),rg=AC.createGain();
+  if(vibHz>0){const lfo=AC.createOscillator(),lg=AC.createGain();lfo.frequency.value=vibHz;lg.gain.value=vibCents;lfo.connect(lg);lg.connect(o1.detune);lg.connect(o2.detune);lfo.start(now);lfo.stop(now+dur+0.12);}
+  o1.type='sawtooth';o2.type='triangle';o1.frequency.value=freq;o2.frequency.value=freq;o2.detune.value=9;
+  lp.type='lowpass';lp.frequency.value=Math.min(7200,freq*5.8);lp.Q.value=1.9;
+  g.gain.setValueAtTime(0,now);g.gain.linearRampToValueAtTime(vol*.68,now+0.04);
+  g.gain.setValueAtTime(vol*.68,now+dur*.78);g.gain.linearRampToValueAtTime(0,now+dur);
+  rg.gain.value=0.24;
+  o1.connect(lp);o2.connect(lp);lp.connect(g);g.connect(AC._m);g.connect(rg);rg.connect(AC._rv);
+  o1.start(now);o2.start(now);o1.stop(now+dur+0.06);o2.stop(now+dur+0.06);
+}
+function playBuzz(){
+  if(!AC)return;const now=AC.currentTime;
+  const o=AC.createOscillator(),g=AC.createGain();
+  o.type='sawtooth';o.frequency.value=128;o.detune.value=-55;
+  g.gain.setValueAtTime(0.1,now);g.gain.linearRampToValueAtTime(0,now+0.38);
+  o.connect(g);g.connect(AC._m);o.start(now);o.stop(now+0.38);
+}
+const F={G3:196,D4:293.66,E4:329.63,Fs4:369.99,G4:392,A4:440,Bb4:466.16,B4:493.88,
+  C5:523.25,Cs5:554.37,D5:587.33,Eb5:622.25,E5:659.25,F5:698.46,Fs5:739.99,G5:784,A5:880};
+
+// ── PARTICLES ─────────────────────────────────────────────────────────────────
+let PP=[];
+function spark(x,y,col,n=18){
+  for(let i=0;i<n;i++){const a=Math.PI*2*i/n+Math.random()*.5,sp=1.5+Math.random()*3.2;PP.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-1,life:1,dec:.018+Math.random()*.02,r:1.5+Math.random()*3.2,col});}
+}
+function floatNote(x,y,sym='♪'){PP.push({x,y,vx:(Math.random()-.5)*.85,vy:-1.9,life:1,dec:.007,r:18,col:'#ffd700',txt:sym});}
+function tickP(){PP=PP.filter(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=.04;p.life-=p.dec;return p.life>0;});}
+function drawP(){
+  PP.forEach(p=>{
+    ctx.save();ctx.globalAlpha=p.life;
+    if(p.txt){ctx.fillStyle=p.col;ctx.font=`${p.r}px Georgia`;ctx.textAlign='center';ctx.fillText(p.txt,p.x,p.y);}
+    else{ctx.fillStyle=p.col;ctx.beginPath();ctx.arc(p.x,p.y,p.r*Math.max(.1,p.life),0,Math.PI*2);ctx.fill();}
+    ctx.restore();
+  });
+}
+
+// ── FADE ─────────────────────────────────────────────────────────────────────
+let FD={a:0,spd:0,cb:null};
+function fadeOut(cb,spd=.026){FD={a:0,spd,cb};}
+function updateFade(){
+  if(!FD.spd)return;
+  if(FD.cb){FD.a=Math.min(1,FD.a+FD.spd);if(FD.a>=1){FD.cb();FD.cb=null;FD.spd=-Math.abs(FD.spd);}}
+  else if(FD.spd<0){FD.a=Math.max(0,FD.a+FD.spd);if(FD.a<=0)FD.spd=0;}
+}
+function drawFade(){if(FD.a>0){ctx.fillStyle=`rgba(4,1,1,${FD.a})`;ctx.fillRect(0,0,W,H);}}
+
+// ── INPUT ─────────────────────────────────────────────────────────────────────
+const K={},PR={},RL={};
+document.addEventListener('keydown',e=>{
+  if(!K[e.code])PR[e.code]=true;K[e.code]=true;initAudio();onKD(e.code);
+  if(['Space','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.code))e.preventDefault();
+},{passive:false});
+document.addEventListener('keyup',e=>{K[e.code]=false;RL[e.code]=true;});
+CV.addEventListener('click',e=>{
+  initAudio();const r=CV.getBoundingClientRect();
+  onCL((e.clientX-r.left)*(W/r.width),(e.clientY-r.top)*(H/r.height));
+});
+function clearIO(){for(const k in PR)delete PR[k];for(const k in RL)delete RL[k];}
+
+// ── UTILS ─────────────────────────────────────────────────────────────────────
+function rr(x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.arcTo(x+w,y,x+w,y+r,r);
+  ctx.lineTo(x+w,y+h-r);ctx.arcTo(x+w,y+h,x+w-r,y+h,r);ctx.lineTo(x+r,y+h);
+  ctx.arcTo(x,y+h,x,y+h-r,r);ctx.lineTo(x,y+r);ctx.arcTo(x,y,x+r,y,r);ctx.closePath();
+}
+function wrap(txt,x,y,mw,lh){
+  const words=txt.split(' ');let line='',cy=y;
+  for(const w of words){const t=line?line+' '+w:w;if(ctx.measureText(t).width>mw&&line){ctx.fillText(line,x,cy);cy+=lh;line=w;}else line=t;}
+  ctx.fillText(line,x,cy);
+}
+let shk=0;function shake(n){shk=n;}
+
+// ── DRAW VIOLIN ───────────────────────────────────────────────────────────────
+function drawViolin(cx,cy,sc=1){
+  ctx.save();ctx.translate(cx,cy);ctx.scale(sc,sc);
+  // Ambient glow
+  const glow=ctx.createRadialGradient(0,0,0,0,0,112);glow.addColorStop(0,'rgba(180,100,18,.18)');glow.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=glow;ctx.beginPath();ctx.arc(0,0,112,0,Math.PI*2);ctx.fill();
+  const bc='#6a2c00',ec='#a04e10';
+  ctx.fillStyle=bc;ctx.strokeStyle=ec;ctx.lineWidth=2;
+  // Lower bout
+  ctx.beginPath();ctx.ellipse(0,38,36,30,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+  // Upper bout
+  ctx.beginPath();ctx.ellipse(0,-38,29,24,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+  // Waist cut-outs
+  ctx.fillStyle='#070102';
+  ctx.beginPath();ctx.ellipse(-19,2,11,16,-.4,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.ellipse(19,2,11,16,.4,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=bc;
+  ctx.beginPath();ctx.ellipse(0,-28,20,17,0,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.ellipse(0,28,26,22,0,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.rect(-12,-22,24,50);ctx.fill();
+  // f-holes
+  ctx.strokeStyle='#0c0203';ctx.lineWidth=2.5;
+  ctx.beginPath();ctx.moveTo(-13,8);ctx.lineTo(-9,26);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(13,8);ctx.lineTo(9,26);ctx.stroke();
+  // Bridge
+  ctx.strokeStyle='#b07030';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(-10,20);ctx.lineTo(10,20);ctx.stroke();
+  // Neck
+  ctx.fillStyle='#491d00';ctx.beginPath();ctx.moveTo(-6,-58);ctx.lineTo(6,-58);ctx.lineTo(7,-22);ctx.lineTo(-7,-22);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#381600';ctx.fillRect(-7,-78,14,20);
+  ctx.strokeStyle=ec;ctx.lineWidth=2;ctx.beginPath();ctx.arc(-5,-81,7,.3,Math.PI*1.9);ctx.stroke();
+  // Strings
+  const sc2=['#e0c870','#d4a850','#c89040','#b87830'];
+  for(let i=0;i<4;i++){const sx=-4.5+i*3;ctx.strokeStyle=sc2[i];ctx.lineWidth=.7+i*.2;ctx.beginPath();ctx.moveTo(sx,-68);ctx.lineTo(sx*1.4,58);ctx.stroke();}
+  ctx.restore();
+}
+
+// ── SCENES ────────────────────────────────────────────────────────────────────
+function scAttic(){
+  const bg=ctx.createLinearGradient(0,0,0,H);bg.addColorStop(0,'#0e0506');bg.addColorStop(1,'#060202');
+  ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+  // Light shaft
+  ctx.save();ctx.globalAlpha=.065+.032*Math.sin(tt*.008);ctx.fillStyle='#e0c040';
+  ctx.beginPath();ctx.moveTo(W*.62,0);ctx.lineTo(W*.68,0);ctx.lineTo(W*.95,H);ctx.lineTo(W*.82,H);ctx.closePath();ctx.fill();ctx.restore();
+  // Clutter silhouettes
+  ctx.fillStyle='#130704';
+  [[40,H-182,132,152],[582,H-158,112,132],[698,H-222,88,198]].forEach(([x,y,w,h])=>ctx.fillRect(x,y,w,h));
+  // Case glow + violin case
+  const cg=ctx.createRadialGradient(W/2,H-132,0,W/2,H-132,96);cg.addColorStop(0,'rgba(200,140,28,.4)');cg.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=cg;ctx.beginPath();ctx.arc(W/2,H-132,96,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#2a1100';ctx.strokeStyle='#604020';ctx.lineWidth=2;rr(W/2-76,H-160,152,60,6);ctx.fill();ctx.stroke();
+  // Dust motes
+  for(let i=0;i<12;i++){const mx=82+((i*184+tt*.28)%(W-138)),my=40+((i*90+tt*.14)%(H*.64)),ma=.1+.15*Math.sin(tt*.022+i);ctx.beginPath();ctx.arc(mx,my,1.2,0,Math.PI*2);ctx.fillStyle=`rgba(220,178,88,${ma})`;ctx.fill();}
+}
+function scNote(){
+  const bg=ctx.createLinearGradient(0,0,W,H);bg.addColorStop(0,'#1a0d05');bg.addColorStop(1,'#0d0503');
+  ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+  ctx.save();ctx.shadowColor='rgba(0,0,0,.6)';ctx.shadowBlur=26;ctx.fillStyle='#d8c47a';rr(W/2-202,H/2-148,404,258,5);ctx.fill();ctx.shadowBlur=0;ctx.restore();
+  ctx.strokeStyle='rgba(100,70,20,.1)';ctx.lineWidth=.7;
+  for(let i=0;i<10;i++){ctx.beginPath();ctx.moveTo(W/2-180,H/2-102+i*25);ctx.lineTo(W/2+180,H/2-102+i*25);ctx.stroke();}
+  ctx.textAlign='center';ctx.fillStyle='#3a1a06';
+  ctx.font='italic 16px Georgia';ctx.fillText('Para mi Elena, cuando esté lista.',W/2,H/2-84);
+  ctx.fillText('Este violín me cruzó un océano.',W/2,H/2-54);ctx.fillText('Que te lleve a algún lugar hermoso.',W/2,H/2-24);
+  ctx.fillText('Tócame el Verano de Vivaldi.',W/2,H/2+12);
+  ctx.font='italic bold 16px Georgia';ctx.fillText('— Abuelo Mateo',W/2,H/2+78);
+}
+function scKitchen(){
+  const bg=ctx.createLinearGradient(0,0,0,H);bg.addColorStop(0,'#251408');bg.addColorStop(1,'#0a0402');
+  ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#c8780a';ctx.fillRect(W*.56,0,W*.37,H*.54);
+  ctx.fillStyle='#1a0805';ctx.fillRect(W*.56+3,3,W*.37-6,H*.54-6);
+  ctx.fillStyle='#3a1e08';ctx.fillRect(0,H*.68,W,H*.05);ctx.fillStyle='#2a1205';ctx.fillRect(0,H*.73,W,H*.28);
+  ctx.fillStyle='#3a2010';rr(W*.24,H*.52,102,67,6);ctx.fill();
+  ['♩','♪','♫'].forEach((n,i)=>{
+    const fa=.3+.7*((Math.sin(tt*.018+i*2.1)+1)/2),fy=H*.37-Math.sin(tt*.02+i*1.5)*24;
+    ctx.save();ctx.globalAlpha=fa*.72;ctx.fillStyle='#d4a840';ctx.font='22px Georgia';ctx.textAlign='center';ctx.fillText(n,W*.26+i*30,fy);ctx.restore();
+  });
+}
+function scStudio(){
+  ctx.fillStyle='#0c0a12';ctx.fillRect(0,0,W,H);
+  for(let i=0;i<11;i++){ctx.fillStyle=`rgba(200,158,62,${.018+.007*Math.sin(tt*.01+i)})`;ctx.fillRect(W*.65,i*55-10,W*.38,21);}
+  ctx.strokeStyle='#4a2e0a';ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(W*.48,H*.8);ctx.lineTo(W*.5,H*.34);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(W*.32,H*.28);ctx.lineTo(W*.68,H*.28);ctx.stroke();
+  ctx.fillStyle='#ede4c8';rr(W*.33,H*.1,W*.34,H*.18,3);ctx.fill();
+  ctx.strokeStyle='#20100a';ctx.lineWidth=.6;
+  for(let i=0;i<5;i++){ctx.beginPath();ctx.moveTo(W*.36,H*.13+i*9);ctx.lineTo(W*.64,H*.13+i*9);ctx.stroke();}
+  ctx.fillStyle='#1a2a10';rr(48,H*.6,82,112,4);ctx.fill();ctx.fillStyle='#2a3a18';ctx.fillRect(52,H*.6+4,74,104);
+  ctx.fillStyle='#c8d0a0';ctx.font='italic 11px Georgia';ctx.textAlign='center';ctx.fillText("Mateo's",89,H*.6+42);ctx.fillText('Journal',89,H*.6+60);
+}
+function scConcert(){
+  const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#06041a');sky.addColorStop(.5,'#0d0728');sky.addColorStop(.8,'#180810');sky.addColorStop(1,'#060106');
+  ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+  for(let i=0;i<38;i++){const sx=(i*139.7)%W,sy=(i*91.3)%(H*.44),tw=.3+.7*Math.sin(tt*.04+i*.7);ctx.beginPath();ctx.arc(sx,sy,.9,0,Math.PI*2);ctx.fillStyle=`rgba(255,255,220,${tw*.65})`;ctx.fill();}
+  ctx.beginPath();ctx.arc(W*.82,H*.11,25,0,Math.PI*2);ctx.fillStyle='#e8d890';ctx.fill();
+  const mg=ctx.createRadialGradient(W*.82,H*.11,0,W*.82,H*.11,52);mg.addColorStop(0,'rgba(230,220,150,.14)');mg.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=mg;ctx.beginPath();ctx.arc(W*.82,H*.11,52,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle='#142808';ctx.lineWidth=11;ctx.beginPath();ctx.arc(W/2,H*1.3,W*.6,Math.PI*1.14,Math.PI*1.86);ctx.stroke();
+  for(let i=0;i<7;i++){const lx=W*.07+i*W*.14,gl=ctx.createRadialGradient(lx,H*.82,0,lx,H*.82,36);gl.addColorStop(0,'rgba(255,200,80,.18)');gl.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=gl;ctx.beginPath();ctx.arc(lx,H*.82,36,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(lx,H*.82,4,0,Math.PI*2);ctx.fillStyle='rgba(255,210,100,.9)';ctx.fill();}
+  for(let i=0;i<11;i++){const ax=40+i*78;ctx.fillStyle='#040104';ctx.beginPath();ctx.arc(ax,H-65,13,0,Math.PI*2);ctx.fill();ctx.fillRect(ax-9,H-65,18,44);}
+}
+
+// ── TITLE ─────────────────────────────────────────────────────────────────────
+let titleT=0;
+const dustMotes=Array.from({length:55},()=>({x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*.18,vy:-.08-Math.random()*.2,r:.5+Math.random()*1.8}));
+function initTitle(){titleT=0;}
+function drawTitle(){
+  titleT++;
+  const bg=ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,H*.8);bg.addColorStop(0,'#2e1308');bg.addColorStop(.6,'#160806');bg.addColorStop(1,'#060202');
+  ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+  dustMotes.forEach(m=>{
+    m.x+=m.vx;m.y+=m.vy;
+    if(m.y<-3){m.y=H+3;m.x=Math.random()*W;}if(m.x<-3)m.x=W+3;if(m.x>W+3)m.x=-3;
+    const ma=.12+.14*Math.sin(tt*.009+m.x*.025);ctx.beginPath();ctx.arc(m.x,m.y,m.r,0,Math.PI*2);ctx.fillStyle=`rgba(218,172,88,${ma})`;ctx.fill();
+  });
+  const va=Math.min(1,titleT/90);ctx.save();ctx.globalAlpha=va;drawViolin(W/2,H/2-54,1.3);ctx.restore();
+  const ta=Math.min(1,Math.max(0,(titleT-70)/60));
+  if(ta>0){
+    ctx.save();ctx.globalAlpha=ta;ctx.textAlign='center';
+    ctx.shadowColor='#c0700a';ctx.shadowBlur=28;ctx.fillStyle='#f0c060';ctx.font='bold 54px Georgia';ctx.fillText('Strings of Memory',W/2,H/2+116);ctx.shadowBlur=0;
+    ctx.fillStyle='#b09040';ctx.font='italic 20px Georgia';ctx.fillText("A Late Bloomer's Journey",W/2,H/2+152);ctx.restore();
+  }
+  if(titleT>110){
+    const pa=Math.min(1,(titleT-110)/50),pulse=.6+.4*Math.sin(titleT*.055);
+    ctx.save();ctx.globalAlpha=pa*pulse;ctx.textAlign='center';ctx.fillStyle='#d4a030';ctx.font='17px Georgia';ctx.fillText('Press ENTER or Click to Begin',W/2,H-58);
+    ctx.globalAlpha=pa*.48;ctx.fillStyle='#806030';ctx.font='italic 13px Georgia';ctx.fillText('For Mateo, who always believed she would play',W/2,H-30);ctx.restore();
+  }
+}
+
+// ── STORY ─────────────────────────────────────────────────────────────────────
+let STR={panels:[],idx:0,len:0,next:''};
+function initStory(panels,nextGs){STR={panels,idx:0,len:0,next:nextGs};}
+function drawStory(){
+  const p=STR.panels[STR.idx];if(!p)return;
+  if(p.scene)p.scene();else{ctx.fillStyle='#080302';ctx.fillRect(0,0,W,H);}
+  const vg=ctx.createRadialGradient(W/2,H/2,H*.2,W/2,H/2,H*.9);vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(0,0,0,.72)');ctx.fillStyle=vg;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(7,2,1,.91)';ctx.strokeStyle='rgba(178,140,52,.4)';ctx.lineWidth=1;rr(50,H-212,W-100,176,8);ctx.fill();ctx.stroke();
+  if(p.speaker){ctx.textAlign='left';ctx.fillStyle='#d4a028';ctx.font='bold 13px Georgia';ctx.fillText(p.speaker,72,H-190);}
+  STR.len=Math.min(p.text.length,STR.len+.58);
+  ctx.fillStyle='#ead0a0';ctx.font='15px Georgia';ctx.textAlign='left';wrap(p.text.substring(0,Math.floor(STR.len)),72,H-172,W-148,22);
+  if(STR.len>=p.text.length){const pulse=.38+.62*Math.sin(tt*.08);ctx.save();ctx.globalAlpha=pulse;ctx.textAlign='right';ctx.fillStyle='#907028';ctx.font='13px Georgia';ctx.fillText('▶ ENTER or Click',W-60,H-16);ctx.restore();}
+}
+function advStory(){
+  const p=STR.panels[STR.idx];if(!p)return;
+  if(STR.len<p.text.length){STR.len=p.text.length;return;}
+  STR.idx++;STR.len=0;
+  if(STR.idx>=STR.panels.length)fadeOut(()=>{gs=STR.next;initGs();});
+}
+const PROLOGUE=[
+  {speaker:'Narrator',scene:scAttic,text:"Elena Vasquez, 40, spent twenty years climbing corporate ladders she never wanted to climb. Last spring she quit. She came home to pack up her late grandfather's house in Seville..."},
+  {speaker:'Narrator',scene:scAttic,text:"...and in the dusty attic, beneath stacks of forgotten letters, she found it. A battered violin case, its leather cracked from decades of sleep. On the handle: a small envelope in Mateo's handwriting."},
+  {speaker:"Mateo's Note (written 1978)",scene:scNote,text:'"Para mi Elena, cuando esté lista. This violin carried me across an ocean. Let it carry you somewhere beautiful. Play me Vivaldi\'s Summer someday. — Abuelo Mateo"'},
+  {speaker:'Elena',scene:scAttic,text:'"I don\'t even know how to hold one of these..." she whispered. But she tucked it under her chin. Something — memory, grief, or music itself — said: begin.'},
+];
+const CH1END=[
+  {speaker:'Narrator',scene:scKitchen,text:'The open strings ring out, one by one — G, D, A, E — four voices, each in tune. Elena closes her eyes. She can almost hear Abuelo humming along from the old kitchen radio.'},
+  {speaker:"Elena's Journal, Week 2",scene:scKitchen,text:'"My teacher says intonation is a lifelong practice — even concert soloists fight for it every day. I find this oddly comforting. I am not behind. I am simply at the beginning."'},
+];
+const CH2END=[
+  {speaker:"Elena's Journal, Week 9",scene:scStudio,text:'"My vibrato is finally starting to breathe. My teacher says it no longer sounds like a nervous hummingbird — it\'s becoming a voice. I found Abuelo\'s practice journal. He spent six months on vibrato alone."'},
+  {speaker:"Elena's Journal, Week 9",scene:scStudio,text:'"Inside the back cover I found a faded concert programme. Summer, Vivaldi. Performed by Mateo Vasquez, 1962. He played it. He actually played it. And I finally understand why he asked me to."'},
+];
+const CH3INTRO=[
+  {speaker:'Narrator',scene:scConcert,text:'Seven months later. A warm August evening. The community garden concert. Elena stands behind an arch woven with late-summer vines. Thirty people wait in quiet rows.'},
+  {speaker:'Elena (thinking)',scene:scConcert,text:"Her hands are shaking. She has practised this piece one hundred and forty-seven times. She thinks of Mateo standing on a dock with his violin case and nothing else, starting over at thirty-five."},
+  {speaker:'Elena (thinking)',scene:scConcert,text:'"He didn\'t wait until he was ready. He started because music was the only thing that made the hard parts bearable." She lifts the bow. The garden holds its breath.'},
+];
+
+// ── CHAPTER 1: INTONATION ("Open Strings") ───────────────────────────────────
+// A bow marker moves along each string. Press SPACE when it lands in the golden zone.
+// 8 notes (2 per string: open + 1st finger). Score 0-10 per note.
+// ─────────────────────────────────────────────────────────────────────────────
+const C1X0=128,C1X1=W-128,C1XL=C1X1-C1X0;
+const CN1=[
+  {s:0,label:'Open G',     freq:F.G3,  zone:[.06,.22],hint:'No fingers needed — let the bow sing freely'},
+  {s:0,label:'B♭ (1st)',   freq:F.Bb4, zone:[.34,.52],hint:'1st finger on G — feel the warmth of the note'},
+  {s:1,label:'Open D',     freq:F.D4,  zone:[.06,.22],hint:'Open D string — rich and resonant'},
+  {s:1,label:'E (1st)',    freq:F.E4,  zone:[.37,.54],hint:'1st finger on D — stay relaxed, listen carefully'},
+  {s:2,label:'Open A',     freq:F.A4,  zone:[.06,.22],hint:'Concert pitch! The whole orchestra tunes to this A'},
+  {s:2,label:'B (1st)',    freq:F.B4,  zone:[.40,.56],hint:'1st finger on A — find the sweet resonant spot'},
+  {s:3,label:'Open E',     freq:F.E5,  zone:[.06,.22],hint:'Highest open string — use a gentle, light bow'},
+  {s:3,label:'F♯ (1st)',   freq:F.Fs4, zone:[.42,.58],hint:'1st finger on E — almost there!'},
+];
+const SL=['G','D','A','E'];
+const SY=[194,285,376,467];
+const SC=['#c89840','#d0a830','#d8b828','#e0c818'];
+
+let c1={};
+function initCh1(){c1={ni:0,pos:0,dir:1,spd:.0035,res:null,timer:0,score:0,vibAmt:0,done:false,ia:0};ch1Note();}
+function ch1Note(){c1.pos=0;c1.dir=1;c1.spd=.003+c1.ni*.00042;c1.res=null;c1.vibAmt=0;}
+
+function drawCh1(){
+  c1.ia=Math.min(1,c1.ia+.018);
+  const bg=ctx.createLinearGradient(0,0,0,H);bg.addColorStop(0,'#1a0d08');bg.addColorStop(1,'#080302');ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+  ctx.save();ctx.globalAlpha=c1.ia;ctx.textAlign='center';
+  ctx.fillStyle='#d4a030';ctx.font='bold 15px Georgia';ctx.fillText('Chapter I — Open Strings',W/2,32);
+  ctx.fillStyle='#806028';ctx.font='italic 12px Georgia';ctx.fillText('Press SPACE when the orange marker lands inside the golden zone',W/2,53);ctx.restore();
+  ctx.textAlign='right';ctx.fillStyle='#d0a030';ctx.font='bold 18px Georgia';ctx.fillText(`Score: ${c1.score}`,W-36,34);
+  ctx.fillStyle='#806028';ctx.font='13px Georgia';ctx.fillText(`${c1.ni+1} / ${CN1.length}`,W-36,54);
+  // Progress dots
+  ctx.save();ctx.globalAlpha=c1.ia;
+  for(let i=0;i<CN1.length;i++){const dx=W/2-(CN1.length*24)/2+i*24;ctx.beginPath();ctx.arc(dx,78,7,0,Math.PI*2);if(i<c1.ni)ctx.fillStyle='#d4a030';else if(i===c1.ni){ctx.fillStyle='#fff060';ctx.shadowColor='#fff060';ctx.shadowBlur=12;}else ctx.fillStyle='#2a1808';ctx.fill();ctx.shadowBlur=0;}
+  ctx.restore();
+  const note=CN1[c1.ni];
+  ctx.save();ctx.globalAlpha=c1.ia;
+  for(let s=0;s<4;s++){
+    const sy=SY[s],act=note.s===s;
+    ctx.fillStyle=act?`rgba(${55+s*14},${38+s*10},18,.3)`:'rgba(0,0,0,.1)';ctx.fillRect(C1X0-28,sy-30,C1XL+56,60);
+    ctx.textAlign='left';ctx.fillStyle=act?'#f0c040':'#503820';ctx.font=act?'bold 20px Georgia':'14px Georgia';ctx.fillText(SL[s],76,sy+7);
+    ctx.fillStyle='#3a1e08';ctx.fillRect(C1X0,sy-13,C1XL,26);
+    // Fret guide lines
+    ctx.strokeStyle='rgba(255,200,80,.1)';ctx.lineWidth=1;ctx.setLineDash([3,5]);
+    for(let fi=1;fi<=6;fi++){const fx=C1X0+C1XL*fi*.14;ctx.beginPath();ctx.moveTo(fx,sy-15);ctx.lineTo(fx,sy+15);ctx.stroke();}
+    ctx.setLineDash([]);
+    // String line (vibrating if active)
+    if(act&&c1.vibAmt>0){
+      ctx.strokeStyle=SC[s];ctx.lineWidth=1.8;ctx.shadowColor=SC[s];ctx.shadowBlur=10;ctx.beginPath();ctx.moveTo(C1X0,sy);
+      for(let xi=0;xi<=C1XL;xi+=4)ctx.lineTo(C1X0+xi,sy+Math.sin(xi*.055+tt*.42)*c1.vibAmt*5.5);
+      ctx.stroke();ctx.shadowBlur=0;c1.vibAmt*=.95;
+    }else{
+      ctx.strokeStyle=act?SC[s]:`rgba(${78+s*20},${58+s*12},28,.5)`;ctx.lineWidth=act?1.7:1;ctx.beginPath();ctx.moveTo(C1X0,sy);ctx.lineTo(C1X1,sy);ctx.stroke();
+    }
+    // Golden zone + moving marker
+    if(act){
+      const zx1=C1X0+C1XL*note.zone[0],zx2=C1X0+C1XL*note.zone[1];
+      ctx.fillStyle='rgba(220,178,28,.22)';ctx.fillRect(zx1,sy-22,zx2-zx1,44);
+      ctx.strokeStyle='rgba(220,178,28,.8)';ctx.lineWidth=1;ctx.setLineDash([5,3]);
+      ctx.beginPath();ctx.moveTo(zx1,sy-22);ctx.lineTo(zx1,sy+22);ctx.moveTo(zx2,sy-22);ctx.lineTo(zx2,sy+22);ctx.stroke();ctx.setLineDash([]);
+      ctx.textAlign='center';ctx.fillStyle='rgba(220,178,28,.82)';ctx.font='12px Georgia';ctx.fillText(note.label,(zx1+zx2)/2,sy-30);
+      // Animate marker
+      if(!c1.res){c1.pos+=c1.dir*c1.spd;if(c1.pos>=1){c1.pos=1;c1.dir=-1;}if(c1.pos<=0){c1.pos=0;c1.dir=1;}}
+      const ix=C1X0+C1XL*c1.pos;
+      ctx.strokeStyle='#ff8028';ctx.lineWidth=2.5;ctx.shadowColor='#ff8028';ctx.shadowBlur=16;ctx.beginPath();ctx.moveTo(ix,sy-26);ctx.lineTo(ix,sy+26);ctx.stroke();ctx.shadowBlur=0;
+      ctx.fillStyle='#ff8028';ctx.beginPath();ctx.moveTo(ix,sy-30);ctx.lineTo(ix+7,sy-20);ctx.lineTo(ix-7,sy-20);ctx.closePath();ctx.fill();
+      ctx.beginPath();ctx.moveTo(ix,sy+30);ctx.lineTo(ix+7,sy+20);ctx.lineTo(ix-7,sy+20);ctx.closePath();ctx.fill();
+    }
+  }
+  ctx.restore();
+  // Result feedback
+  if(c1.res&&c1.timer>0){
+    c1.timer--;const alpha=c1.timer/45;ctx.save();ctx.globalAlpha=alpha;ctx.textAlign='center';
+    if(c1.res==='good'){ctx.fillStyle='#80ff40';ctx.shadowColor='#80ff40';ctx.shadowBlur=18;ctx.font='bold 34px Georgia';ctx.fillText('In Tune! ♪',W/2,H/2+30);}
+    else{ctx.fillStyle='#ff6030';ctx.font='bold 30px Georgia';ctx.fillText('Out of Tune...',W/2,H/2+30);}
+    ctx.shadowBlur=0;ctx.restore();
+  }
+  if(!c1.done){ctx.textAlign='center';ctx.fillStyle='rgba(152,118,62,.72)';ctx.font='italic 13px Georgia';ctx.fillText(CN1[c1.ni]?.hint||'',W/2,H-22);}
+  if(c1.done){const pulse=.5+.5*Math.sin(tt*.09);ctx.save();ctx.globalAlpha=pulse;ctx.textAlign='center';ctx.fillStyle='#f0c030';ctx.font='bold 22px Georgia';ctx.shadowColor='#f0c030';ctx.shadowBlur=14;ctx.fillText('All strings in tune! Press ENTER to continue',W/2,H/2+10);ctx.restore();}
+}
+
+function updateCh1(){
+  if(c1.done){if(PR['Enter']||PR['Space'])fadeOut(()=>{gs='ch1end';initGs();});return;}
+  if(c1.res){if(c1.timer<=0){c1.ni++;if(c1.ni>=CN1.length)c1.done=true;else ch1Note();}return;}
+  if(PR['Space']||PR['KeyZ']){
+    const note=CN1[c1.ni],inZ=c1.pos>=note.zone[0]&&c1.pos<=note.zone[1];
+    c1.res=inZ?'good':'bad';c1.timer=45;
+    if(inZ){c1.score+=10;c1.vibAmt=1;playNote(note.freq,1.8,.28,5,4);spark(C1X0+C1XL*c1.pos,SY[note.s],'#ffd040',22);floatNote(C1X0+C1XL*c1.pos,SY[note.s]-35,'♪');}
+    else{playBuzz();shake(6);}
+  }
+}
+
+// ── CHAPTER 2: VIBRATO ("The Living Voice") ───────────────────────────────────
+// A metronome flashes left (←) and right (→) alternately.
+// Press the matching arrow key while it's glowing. Hit N beats to advance.
+// 3 phases: slow → medium → fast vibrato.
+// ─────────────────────────────────────────────────────────────────────────────
+const CP2=[
+  {label:'Slow Vibrato',   bpm:148,need:10,note:F.A4,hint:'Press ← → alternately — slow and even, like a gentle wave'},
+  {label:'Medium Vibrato', bpm:210,need:16,note:F.D5,hint:'A little faster now — find the rhythmic flow'},
+  {label:'Fast Vibrato',   bpm:288,need:24,note:F.G5,hint:'Keep the waves even — let the note fully sing!'},
+];
+let c2={};
+function initCh2(){
+  c2={ph:0,score:0,done:false,ia:0,hits:0,misses:0,waveData:new Array(300).fill(0),armPos:0,beatExpected:0,beatDue:0,beatHit:false,hitFlash:0,interval:0};
+  ch2Phase();
+}
+function ch2Phase(){
+  const p=CP2[c2.ph];c2.interval=Math.round(3600/p.bpm);
+  c2.hits=0;c2.misses=0;c2.waveData=new Array(300).fill(0);c2.armPos=0;
+  c2.beatExpected=0;c2.beatDue=tt+c2.interval;c2.beatHit=false;c2.hitFlash=0;
+}
+
+function drawCh2(){
+  c2.ia=Math.min(1,c2.ia+.018);
+  const bg=ctx.createLinearGradient(0,0,W,H);bg.addColorStop(0,'#080a14');bg.addColorStop(1,'#050306');ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+  for(let i=0;i<10;i++){ctx.fillStyle=`rgba(200,158,62,${.018+.007*Math.sin(tt*.01+i)})`;ctx.fillRect(W*.65,i*55-10,W*.38,21);}
+  const ph=CP2[c2.ph];
+  ctx.save();ctx.globalAlpha=c2.ia;ctx.textAlign='center';
+  ctx.fillStyle='#90b0c8';ctx.font='bold 15px Georgia';ctx.fillText('Chapter II — The Living Voice',W/2,32);
+  ctx.fillStyle='#506070';ctx.font='italic 12px Georgia';ctx.fillText('Match the vibrato rhythm — press the glowing arrow key',W/2,53);ctx.restore();
+  ctx.textAlign='right';ctx.fillStyle='#80b0d0';ctx.font='bold 18px Georgia';ctx.fillText(`Score: ${c2.score}`,W-36,34);
+  // Phase dots
+  ctx.save();ctx.globalAlpha=c2.ia;
+  for(let i=0;i<3;i++){const dx=W/2-30+i*30;ctx.beginPath();ctx.arc(dx,78,8,0,Math.PI*2);if(i<c2.ph)ctx.fillStyle='#60a0d0';else if(i===c2.ph){ctx.fillStyle='#a0d0f0';ctx.shadowColor='#a0d0f0';ctx.shadowBlur=10;}else ctx.fillStyle='#101820';ctx.fill();ctx.shadowBlur=0;}
+  ctx.textAlign='center';ctx.fillStyle='#60a0c0';ctx.font='bold 17px Georgia';ctx.fillText(ph.label,W/2,112);ctx.restore();
+  // Progress bar
+  const prog=Math.min(1,c2.hits/ph.need);ctx.fillStyle='#0e1620';rr(W/2-200,128,400,14,7);ctx.fill();
+  if(prog>0){ctx.fillStyle='#40a0c0';rr(W/2-200,128,400*prog,14,7);ctx.fill();}
+  ctx.strokeStyle='#1e4860';ctx.lineWidth=1;rr(W/2-200,128,400,14,7);ctx.stroke();
+  ctx.textAlign='center';ctx.fillStyle='#406888';ctx.font='12px Georgia';ctx.fillText(`${c2.hits} / ${ph.need}`,W/2,119);
+  // Metronome: two large arrow "buttons"
+  const timeTobeat=Math.max(0,c2.beatDue-tt)/c2.interval;
+  ctx.save();ctx.globalAlpha=c2.ia;
+  for(let d=0;d<2;d++){
+    const dx=W/2+(d===0?-72:72),dy=238,isActive=(d===c2.beatExpected);
+    const urgency=isActive?Math.max(.1,timeTobeat):0;
+    const glowAmt=isActive?(urgency>.5?1:.5+urgency):.14;
+    ctx.beginPath();ctx.arc(dx,dy,28,0,Math.PI*2);
+    const circCol=d===0?`rgba(80,150,200,${.2+glowAmt*.5})`:`rgba(80,200,150,${.2+glowAmt*.5})`;
+    ctx.fillStyle=circCol;ctx.fill();
+    if(isActive&&urgency>.3){ctx.shadowColor=d===0?'#50a0c8':'#50c8a0';ctx.shadowBlur=24+urgency*16;}
+    ctx.strokeStyle=d===0?`rgba(80,150,200,${.4+glowAmt*.5})`:`rgba(80,200,150,${.4+glowAmt*.5})`;ctx.lineWidth=2;ctx.beginPath();ctx.arc(dx,dy,28,0,Math.PI*2);ctx.stroke();ctx.shadowBlur=0;
+    ctx.fillStyle=isActive?'#e8f8ff':'#304858';ctx.font=`bold ${isActive?22:18}px Georgia`;ctx.textAlign='center';ctx.fillText(d===0?'←':'→',dx,dy+7);
+    // Key label
+    ctx.fillStyle='rgba(60,90,110,.7)';ctx.font='12px Georgia';ctx.fillText(d===0?'← key':'→ key',dx,dy+44);
+  }
+  // Urgency ring when beat is about to expire
+  if((c2.beatDue-tt)<c2.interval*.2&&!c2.beatHit){
+    const u=1-(c2.beatDue-tt)/(c2.interval*.2);
+    const dx=W/2+(c2.beatExpected===0?-72:72);
+    ctx.strokeStyle=`rgba(255,80,40,${u*.6})`;ctx.lineWidth=3;ctx.beginPath();ctx.arc(dx,238,32,0,Math.PI*2);ctx.stroke();
+  }
+  ctx.restore();
+  ctx.save();ctx.globalAlpha=c2.ia;ctx.textAlign='center';ctx.fillStyle='rgba(60,90,110,.5)';ctx.font='italic 12px Georgia';ctx.fillText('alternate ← and → in time with the flashing',W/2,290);ctx.restore();
+  // Waveform display
+  const wY=362,wX=80,wW=W-160;
+  ctx.strokeStyle='rgba(60,160,200,.28)';ctx.lineWidth=2;ctx.setLineDash([7,4]);
+  ctx.beginPath();for(let x=0;x<=wW;x++){const fr=x/wW;ctx.lineTo(wX+x,wY+Math.sin(fr*Math.PI*2*5)*18);}
+  ctx.stroke();ctx.setLineDash([]);
+  ctx.strokeStyle='rgba(255,255,255,.1)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(wX,wY);ctx.lineTo(wX+wW,wY);ctx.stroke();
+  if(c2.waveData.some(v=>v!==0)){
+    ctx.strokeStyle='#f0d060';ctx.lineWidth=2.5;ctx.shadowColor='#f0d060';ctx.shadowBlur=6;ctx.beginPath();c2.waveData.forEach((v,i)=>{const x=wX+(i/c2.waveData.length)*wW;i===0?ctx.moveTo(x,wY+v):ctx.lineTo(x,wY+v);});ctx.stroke();ctx.shadowBlur=0;
+    ctx.textAlign='left';ctx.fillStyle='rgba(240,200,80,.7)';ctx.font='italic 12px Georgia';ctx.fillText('Your vibrato',wX,wY+42);
+  }
+  ctx.textAlign='left';ctx.fillStyle='rgba(60,160,200,.5)';ctx.font='italic 12px Georgia';ctx.fillText('Target',wX,wY-28);
+  // Bow arm track
+  const ax=W/2,ay=470,ar=110;ctx.fillStyle='#1a2030';rr(ax-ar-12,ay-14,(ar+12)*2,28,14);ctx.fill();ctx.strokeStyle='#304050';ctx.lineWidth=1;rr(ax-ar-12,ay-14,(ar+12)*2,28,14);ctx.stroke();
+  ctx.fillStyle=c2.hitFlash>0?'#80e0c0':'#70b0d0';ctx.shadowColor=c2.hitFlash>0?'#80e0c0':'#70b0d0';ctx.shadowBlur=14;ctx.beginPath();ctx.arc(ax+c2.armPos,ay,13,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+  ctx.textAlign='center';ctx.fillStyle='#4a7090';ctx.font='12px Georgia';ctx.fillText('bow arm',ax,ay+32);
+  ctx.fillStyle='rgba(148,118,62,.72)';ctx.font='italic 13px Georgia';ctx.fillText(ph.hint,W/2,H-22);
+  if(c2.hitFlash>0)c2.hitFlash--;
+  if(c2.done){const pulse=.5+.5*Math.sin(tt*.09);ctx.save();ctx.globalAlpha=pulse;ctx.textAlign='center';ctx.fillStyle='#a0d0f0';ctx.font='bold 22px Georgia';ctx.shadowColor='#a0d0f0';ctx.shadowBlur=14;ctx.fillText('Beautiful vibrato! Press ENTER to continue',W/2,H/2);ctx.restore();}
+}
+
+function updateCh2(){
+  if(c2.done){if(PR['Enter']||PR['Space'])fadeOut(()=>{gs='ch2end';initGs();});return;}
+  const ph=CP2[c2.ph];
+  // Move arm based on keys
+  let dir=0;if(K['ArrowLeft']||K['KeyA'])dir=-1;if(K['ArrowRight']||K['KeyD'])dir=1;
+  if(dir!==0)c2.armPos=Math.max(-110,Math.min(110,c2.armPos+dir*4.8));else c2.armPos*=.9;
+  c2.waveData.push(c2.armPos*.18);if(c2.waveData.length>300)c2.waveData.shift();
+  // Check if beat expired (miss)
+  if(tt>=c2.beatDue&&!c2.beatHit){
+    c2.misses++;c2.beatExpected=(c2.beatExpected+1)%2;c2.beatDue=tt+c2.interval;c2.beatHit=false;
+  }
+  // Check for correct key press (hit)
+  const leftHit=(PR['ArrowLeft']||PR['KeyA'])&&c2.beatExpected===0&&tt<c2.beatDue;
+  const rightHit=(PR['ArrowRight']||PR['KeyD'])&&c2.beatExpected===1&&tt<c2.beatDue;
+  if(leftHit||rightHit){
+    c2.hits++;c2.beatHit=true;c2.hitFlash=10;
+    const sym=c2.beatExpected===0?'←':'→';floatNote(W/2+(c2.beatExpected===0?-72:72),210,sym);
+    playNote(ph.note,.08,.18);
+    c2.beatExpected=(c2.beatExpected+1)%2;c2.beatDue=tt+c2.interval;c2.beatHit=false;
+    if(c2.hits>=ph.need){
+      c2.score+=Math.max(5,20-c2.misses*2);playNote(ph.note,2,.3,ph.bpm/60,6);spark(W/2,362,'#80c0e0',30);
+      c2.ph++;if(c2.ph>=CP2.length)c2.done=true;else ch2Phase();
+    }
+  }
+}
+
+// ── CHAPTER 3: VIVALDI'S SUMMER ("Storm") ────────────────────────────────────
+// Notes scroll right→left across 4 string lanes (G, D, A, E).
+// Keys: A=G lane, S=D lane, D=A lane, F=E lane.
+// Wavy notes require holding the key + ← → vibrato.
+// Performance meter drives the storm intensity.
+// ─────────────────────────────────────────────────────────────────────────────
+const LKEYS=['KeyA','KeyS','KeyD','KeyF'];
+const LNAMES=['G','D','A','E'];
+const LCOLS=['#c87820','#c8a018','#58b888','#6888cc'];
+const LY=[478,372,266,160];
+const HX=188,HW=54,NSPD=4.2;
+
+function buildNotes(){
+  const q=38,e=19,s=9,h=76; // frame durations at ~95 BPM
+  const TR=Math.ceil((W+60-HX)/NSPD); // travel time in frames ≈185
+  const OFF=TR+110; // notes first hit at frame ~295
+  // [lane, freq, dur_frames, hit_time]
+  const mel=[
+    // Opening tremolo on G4 (dramatic storm start)
+    [1,F.G4,s,OFF],[1,F.G4,s,OFF+s],[1,F.G4,s,OFF+s*2],[1,F.G4,s,OFF+s*3],
+    // Main theme: descending phrase (the famous Vivaldi melody)
+    [2,F.D5,e,OFF+q],[2,F.C5,e,OFF+q+e],[2,F.Bb4,e,OFF+q*2],[2,F.A4,e,OFF+q*2+e],
+    [1,F.G4,h,OFF+q*3], // long G — vibrato!
+    // Rising dramatic response
+    [1,F.A4,e,OFF+q*5],[1,F.Bb4,e,OFF+q*5+e],[2,F.C5,e,OFF+q*6],[2,F.D5,q,OFF+q*6+e],
+    // Storm intensifies
+    [3,F.G5,s,OFF+q*8],[3,F.G5,s,OFF+q*8+s],[2,F.Fs5,s,OFF+q*8+e],[2,F.E5,s,OFF+q*8+e+s],
+    [2,F.D5,e,OFF+q*9],[2,F.Eb5,e,OFF+q*9+e],[1,F.Bb4,e,OFF+q*10],[1,F.A4,e,OFF+q*10+e],
+    [1,F.G4,h,OFF+q*11], // vibrato G again
+    // The famous furious passage
+    [3,F.G5,s,OFF+q*13],[2,F.Fs5,s,OFF+q*13+s],[2,F.E5,s,OFF+q*13+e],[2,F.D5,s,OFF+q*13+e+s],
+    [1,F.C5,s,OFF+q*14],[1,F.Bb4,s,OFF+q*14+s],[1,F.A4,e,OFF+q*14+e],
+    // Climactic double-string passage
+    [2,F.D5,e,OFF+q*15],[3,F.G5,e,OFF+q*15+e],[2,F.D5,e,OFF+q*16],[3,F.G5,e,OFF+q*16+e],
+    [2,F.D5,h,OFF+q*17], // big vibrato
+    // Final descent to the tonic
+    [2,F.C5,e,OFF+q*19],[1,F.Bb4,e,OFF+q*19+e],[1,F.A4,e,OFF+q*20],[1,F.G4,e,OFF+q*20+e],
+    [1,F.G4,h+q,OFF+q*21], // final long G — closing vibrato!
+  ];
+  return mel.map(([lane,freq,dur,hitT])=>({
+    lane,freq,dur,spawnT:hitT-TR,vib:dur>=h,hit:false,missed:false,x:W+62
+  }));
+}
+
+let c3={};
+function initCh3(){
+  c3={score:0,combo:0,maxCombo:0,hits:0,misses:0,notes:[],active:[],ni:0,storm:.1,lightning:null,perf:.5,done:false,endTimer:0,timer:0,ia:0};
+  c3.notes=buildNotes();
+}
+
+function drawCh3(){
+  const si=c3.storm;
+  // Storm sky — shifts from deep purple (calm) to stormy grey-blue (intense)
+  const sky=ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,`rgb(${5+si*32},${2+si*9},${18+si*16})`);sky.addColorStop(.65,`rgb(${6+si*20},${2+si*6},${12+si*9})`);sky.addColorStop(1,'#010102');
+  ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+  // Storm clouds
+  for(let i=0;i<6;i++){const cx=((i*188+c3.timer*.26)%(W+200))-100;ctx.fillStyle=`rgba(18,12,28,${.28+si*.4})`;ctx.beginPath();ctx.ellipse(cx,28+i*18,132,44,0,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.ellipse(cx-68,44+i*18,84,32,0,0,Math.PI*2);ctx.fill();}
+  // Lightning
+  if(c3.lightning){c3.lightning.t--;if(c3.lightning.t>0){ctx.strokeStyle=`rgba(200,220,255,${c3.lightning.t/14})`;ctx.lineWidth=2;ctx.shadowColor='#a0c0ff';ctx.shadowBlur=20;ctx.beginPath();let lx=c3.lightning.x,ly=0;ctx.moveTo(lx,ly);while(ly<H*.55){lx+=(Math.random()-.5)*28;ly+=28+Math.random()*38;ctx.lineTo(lx,ly);}ctx.stroke();ctx.shadowBlur=0;}else c3.lightning=null;}
+  if(Math.random()<.0065*si)c3.lightning={x:Math.random()*W,t:14};
+  // Audience
+  for(let i=0;i<10;i++){const ax=40+i*82;ctx.fillStyle='#040104';ctx.beginPath();ctx.arc(ax,H-62,12,0,Math.PI*2);ctx.fill();ctx.fillRect(ax-8,H-62,16,42);}
+  // HUD
+  ctx.save();ctx.globalAlpha=c3.ia=Math.min(1,c3.ia+.015);
+  ctx.textAlign='center';ctx.fillStyle='#c0a038';ctx.font='bold 14px Georgia';ctx.fillText('Chapter III — Summer  (Vivaldi)',W/2,30);
+  ctx.textAlign='right';ctx.fillStyle='#f0d058';ctx.font='bold 22px Georgia';ctx.fillText(`${c3.score}`,W-36,36);
+  if(c3.combo>2){ctx.fillStyle='#ff9018';ctx.font='bold 15px Georgia';ctx.fillText(`♪ ${c3.combo}× combo`,W-36,55);}
+  ctx.textAlign='left';ctx.fillStyle='#80a058';ctx.font='13px Georgia';ctx.fillText(`♪ ${c3.hits}`,38,36);ctx.fillStyle='#a05838';ctx.fillText(`✗ ${c3.misses}`,38,54);
+  ctx.restore();
+  // Countdown overlay
+  if(c3.timer<120){
+    const cdNum=Math.ceil((120-c3.timer)/40);if(cdNum>0){const cdA=1-(c3.timer%40)/40;ctx.save();ctx.globalAlpha=cdA;ctx.textAlign='center';ctx.fillStyle='#f0d060';ctx.font='bold 72px Georgia';ctx.shadowColor='#f0d060';ctx.shadowBlur=32;ctx.fillText(cdNum,W/2,H/2);ctx.shadowBlur=0;ctx.restore();}
+  }
+  // Lanes
+  for(let l=0;l<4;l++){
+    const ly=LY[l];ctx.fillStyle=`rgba(${18+l*10},${14+l*7},${8+l*4},.44)`;ctx.fillRect(0,ly-25,W,50);
+    ctx.strokeStyle=`rgba(${88+l*26},${66+l*18},${34+l*8},.26)`;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,ly-25);ctx.lineTo(W,ly-25);ctx.moveTo(0,ly+25);ctx.lineTo(W,ly+25);ctx.stroke();
+    ctx.textAlign='left';ctx.fillStyle=LCOLS[l];ctx.font='bold 14px Georgia';ctx.fillText(`${LNAMES[l]}  [${['A','S','D','F'][l]}]`,10,ly+5);
+    const kd=K[LKEYS[l]];ctx.strokeStyle=kd?LCOLS[l]:'rgba(88,68,32,.46)';ctx.lineWidth=kd?3:1;if(kd){ctx.shadowColor=LCOLS[l];ctx.shadowBlur=10;}
+    ctx.beginPath();ctx.moveTo(HX,ly-22);ctx.lineTo(HX,ly+22);ctx.stroke();ctx.shadowBlur=0;
+    // Hit window brackets
+    ctx.strokeStyle=kd?LCOLS[l]:`rgba(68,52,24,.38)`;ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(HX-HW,ly-20);ctx.lineTo(HX-HW,ly+20);ctx.moveTo(HX+HW,ly-20);ctx.lineTo(HX+HW,ly+20);ctx.stroke();
+  }
+  // Draw notes
+  c3.active.forEach(n=>{
+    if(n.hit||n.missed)return;const ly=LY[n.lane],col=LCOLS[n.lane];
+    const nw=Math.max(18,NSPD*n.dur);
+    ctx.fillStyle=col;ctx.shadowColor=col;ctx.shadowBlur=8;rr(n.x-nw,ly-16,nw,32,5);ctx.fill();ctx.shadowBlur=0;
+    // Wavy vibrato texture on long notes
+    if(n.vib){
+      ctx.strokeStyle='rgba(255,255,255,.55)';ctx.lineWidth=1.5;ctx.setLineDash([3,3]);
+      ctx.beginPath();for(let wx=4;wx<nw-4;wx+=5)ctx.lineTo(n.x-nw+wx,ly+(wx%10<5?-6:6));ctx.stroke();ctx.setLineDash([]);
+    }
+  });
+  // Vibrato prompt
+  const vn=c3.active.find(n=>n.vib&&!n.hit&&!n.missed&&Math.abs(n.x-HX)<HW&&K[LKEYS[n.lane]]);
+  if(vn){const pulse=.6+.4*Math.sin(tt*.24);ctx.save();ctx.globalAlpha=pulse;ctx.textAlign='center';ctx.fillStyle='#f0e080';ctx.font='italic 14px Georgia';ctx.fillText('← → vibrato!',HX,LY[vn.lane]-38);ctx.restore();}
+  // Performance meter (right edge)
+  const pmH=180,pmY=H/2-pmH/2,pmX=W-22;ctx.fillStyle='rgba(0,0,0,.5)';ctx.fillRect(pmX-8,pmY,16,pmH);
+  const pf=c3.perf*pmH,pg=ctx.createLinearGradient(0,pmY+pmH-pf,0,pmY+pmH);pg.addColorStop(0,'#f0d060');pg.addColorStop(1,'#60f030');
+  ctx.fillStyle=pg;ctx.fillRect(pmX-8,pmY+pmH-pf,16,pf);ctx.textAlign='center';ctx.fillStyle='#806038';ctx.font='11px Georgia';ctx.fillText('♪',pmX,pmY-10);
+  // End screen
+  if(c3.done&&c3.endTimer>60){
+    const a=Math.min(1,(c3.endTimer-60)/60);ctx.save();ctx.globalAlpha=a;
+    ctx.fillStyle='rgba(200,150,18,.12)';ctx.fillRect(0,0,W,H);
+    ctx.textAlign='center';ctx.fillStyle='#f0d060';ctx.font='bold 42px Georgia';ctx.shadowColor='#f0d060';ctx.shadowBlur=28;ctx.fillText('Bravo!',W/2,H/2-44);ctx.shadowBlur=0;
+    ctx.fillStyle='#d0b048';ctx.font='20px Georgia';ctx.fillText(`${c3.hits} notes hit  ·  Combo ×${c3.maxCombo}  ·  Score ${c3.score}`,W/2,H/2+8);
+    const pulse=.5+.5*Math.sin(tt*.08);ctx.globalAlpha=a*pulse;ctx.fillStyle='#907030';ctx.font='16px Georgia';ctx.fillText('Press ENTER to see the ending',W/2,H/2+52);ctx.restore();
+  }
+}
+
+function updateCh3(){
+  c3.timer++;
+  if(c3.done){
+    c3.endTimer++;
+    if(c3.endTimer>60&&(PR['Enter']||PR['Space']))fadeOut(()=>{gs='credits';initGs();});
+    return;
+  }
+  // Spawn notes
+  while(c3.ni<c3.notes.length&&c3.notes[c3.ni].spawnT<=c3.timer){c3.active.push(c3.notes[c3.ni]);c3.ni++;}
+  // Move notes
+  c3.active.forEach(n=>{if(!n.hit&&!n.missed)n.x-=NSPD;});
+  // Miss check
+  c3.active.forEach(n=>{
+    if(!n.hit&&!n.missed&&n.x<HX-HW-NSPD*n.dur){n.missed=true;c3.misses++;c3.combo=0;c3.perf=Math.max(0,c3.perf-.08);c3.storm=Math.min(1,c3.storm+.055);}
+  });
+  // Hit check
+  for(let l=0;l<4;l++){
+    if(PR[LKEYS[l]]){
+      let best=null,bestD=HW;
+      c3.active.forEach(n=>{if(n.hit||n.missed||n.lane!==l)return;const d=Math.abs(n.x-HX);if(d<bestD){bestD=d;best=n;}});
+      if(best){
+        best.hit=true;c3.hits++;c3.combo++;c3.maxCombo=Math.max(c3.maxCombo,c3.combo);
+        const acc=1-bestD/HW;c3.score+=Math.round(10*acc*(1+c3.combo*.08));
+        c3.perf=Math.min(1,c3.perf+.055);c3.storm=Math.max(0,c3.storm-.032);
+        playNote(best.freq,best.dur/60,.25,best.vib?5.5:0,best.vib?5:0);
+        spark(HX,LY[l],LCOLS[l],20);if(c3.combo>4)floatNote(HX,LY[l]-40,['♩','♪','♫','♬'][l]);
+      }
+    }
+  }
+  // Vibrato bonus
+  if(K['ArrowLeft']||K['ArrowRight']){
+    c3.active.forEach(n=>{if(n.vib&&!n.missed&&Math.abs(n.x-HX)<HW&&K[LKEYS[n.lane]]&&Math.random()<.1)c3.score++;});
+  }
+  c3.active=c3.active.filter(n=>n.x>-140);
+  // End check
+  if(c3.ni>=c3.notes.length&&c3.active.filter(n=>!n.hit&&!n.missed).length===0&&!c3.done){
+    c3.done=true;c3.endTimer=0;
+    setTimeout(()=>{spark(W/2,H/2,'#ffd700',50);playNote(F.G4,3,.32,5,8);for(let i=0;i<8;i++)setTimeout(()=>spark(Math.random()*W,Math.random()*H,'#ffd700',8),i*140);},400);
+  }
+}
+
+// ── CREDITS ───────────────────────────────────────────────────────────────────
+let credT=0;
+const CRED=[
+  {t:'',s:0},{t:'The garden is quiet now.',s:20,st:'italic'},
+  {t:'',s:0},{t:'Elena plays the last note of Summer.',s:18,st:'italic'},
+  {t:'The sound hangs in the warm August air...',s:18,st:'italic'},
+  {t:'...then fades into the night.',s:18,st:'italic'},
+  {t:'',s:0},{t:'Someone in the audience is weeping.',s:18,st:'italic'},
+  {t:"She doesn't know it yet, but so is she.",s:18,st:'italic'},
+  {t:'',s:0},{t:'"Abuelo," she thinks, "I kept my promise."',s:24,st:'italic',c:'#f0d058'},
+  {t:'',s:0},{t:'— — —',s:14,c:'#806038'},{t:'',s:0},
+  {t:'Strings of Memory',s:32,st:'bold',c:'#f0c058'},
+  {t:"A Late Bloomer's Journey",s:16,st:'italic',c:'#b09040'},
+  {t:'',s:0},{t:'It is never too late to begin.',s:20,st:'italic',c:'#d4b058'},
+  {t:'',s:0},{t:'',s:0},{t:'Press ENTER to play again',s:14,c:'#706038'},
+];
+function initCredits(){
+  credT=0;
+  setTimeout(()=>{if(AC){playNote(F.G4,3.5,.15,4,5);setTimeout(()=>playNote(F.D5,3.2,.12,4,5),250);setTimeout(()=>playNote(F.G5,3,.1,4,5),500);}},600);
+}
+function drawCredits(){
+  credT++;
+  const bg=ctx.createLinearGradient(0,0,0,H);bg.addColorStop(0,'#0a0805');bg.addColorStop(1,'#030201');ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+  for(let i=0;i<52;i++){const sx=(i*139.5)%W,sy=(i*89.3)%H,tw=.3+.7*Math.sin(credT*.03+i*.7);ctx.beginPath();ctx.arc(sx,sy,.8,0,Math.PI*2);ctx.fillStyle=`rgba(255,255,220,${tw*.55})`;ctx.fill();}
+  ctx.save();ctx.globalAlpha=Math.min(1,credT/65);drawViolin(W/2,78,.62);ctx.restore();
+  let y=160;
+  CRED.forEach((l,i)=>{
+    const la=Math.min(1,Math.max(0,(credT-i*22)/45));if(la<=0){y+=(l.s||8)+10;return;}
+    ctx.save();ctx.globalAlpha=la;ctx.textAlign='center';ctx.font=`${l.st?l.st+' ':''}${l.s||12}px Georgia`;ctx.fillStyle=l.c||'#d0b07a';ctx.fillText(l.t,W/2,y);ctx.restore();
+    y+=(l.s||8)+10;
+  });
+}
+function updateCredits(){if(PR['Enter']||PR['Space'])fadeOut(()=>{gs='title';totalScore=0;initGs();});}
+
+// ── GAME STATE ────────────────────────────────────────────────────────────────
+let gs='title',totalScore=0;
+function initGs(){
+  PP=[];
+  switch(gs){
+    case'title':    initTitle();break;
+    case'prologue': initStory(PROLOGUE,'ch1');break;
+    case'ch1':      initCh1();break;
+    case'ch1end':   initStory(CH1END,'ch2');break;
+    case'ch2':      initCh2();break;
+    case'ch2end':   initStory(CH2END,'ch3intro');break;
+    case'ch3intro': initStory(CH3INTRO,'ch3');break;
+    case'ch3':      initCh3();break;
+    case'credits':  initCredits();break;
+  }
+}
+function onKD(code){
+  if(gs==='title'&&(code==='Enter'||code==='Space'))fadeOut(()=>{gs='prologue';initGs();});
+  if(['prologue','ch1end','ch2end','ch3intro'].includes(gs)&&(code==='Enter'||code==='Space'))advStory();
+}
+function onCL(){
+  if(gs==='title')fadeOut(()=>{gs='prologue';initGs();});
+  if(['prologue','ch1end','ch2end','ch3intro'].includes(gs))advStory();
+}
+
+// ── MAIN LOOP ─────────────────────────────────────────────────────────────────
+initGs();
+(function loop(){
+  tt++;
+  // Screen shake
+  if(shk>0.5){ctx.save();ctx.translate((Math.random()-.5)*shk,(Math.random()-.5)*shk);shk*=.78;}
+  // Draw & update active state
+  switch(gs){
+    case'title':    drawTitle();break;
+    case'prologue':case'ch1end':case'ch2end':case'ch3intro': drawStory();break;
+    case'ch1':      drawCh1();updateCh1();break;
+    case'ch2':      drawCh2();updateCh2();break;
+    case'ch3':      drawCh3();updateCh3();break;
+    case'credits':  drawCredits();updateCredits();break;
+  }
+  tickP();drawP();updateFade();drawFade();
+  if(shk>0.5)ctx.restore();else shk=0;
+  clearIO();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
