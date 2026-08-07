@@ -1,0 +1,1838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>HEMLINE — a stitched story</title>
+<style>
+/* ============================================================
+   HEMLINE — Design tokens
+   ============================================================ */
+:root{
+  --ink:        #14111A;
+  --ink-2:      #1D1822;
+  --ink-3:      #2A2333;
+  --ink-4:      #362D42;
+  --parchment:  #EDE3D3;
+  --parchment-dim: #B7AB99;
+  --parchment-faint: #7C7568;
+  --brass:      #C9A15A;
+  --brass-bright: #E7C685;
+  --plum:       #4B2E5A;
+  --plum-bright: #7A4F91;
+  --ember:      #A85332;
+  --ember-bright: #C96A45;
+  --thread-blue:#3E5C76;
+  --good:       #6E8F6C;
+
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "URW Palladio L", Georgia, serif;
+  --font-body: "Avenir Next", "Century Gothic", Futura, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  --radius-s: 3px;
+  --radius-m: 8px;
+  --radius-l: 18px;
+  --ease: cubic-bezier(.22,.75,.28,1);
+  --ease-soft: cubic-bezier(.4,0,.2,1);
+}
+
+*,*::before,*::after{ box-sizing:border-box; }
+html,body{ height:100%; }
+body{
+  margin:0;
+  background:#08070A;
+  background-image:
+    radial-gradient(ellipse 900px 500px at 50% -10%, rgba(75,46,90,.35), transparent 60%),
+    radial-gradient(ellipse 700px 500px at 90% 110%, rgba(62,92,118,.18), transparent 60%);
+  font-family:var(--font-body);
+  color:var(--parchment);
+  -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+}
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{ animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; }
+}
+
+::selection{ background:var(--brass); color:var(--ink); }
+
+button{ font-family:inherit; }
+input{ font-family:inherit; }
+
+/* subtle paper-grain overlay for the whole stage */
+.grain{
+  position:absolute; inset:0; pointer-events:none; z-index:40; opacity:.05; mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+
+/* ============================================================
+   Stage / App shell
+   ============================================================ */
+#stageOuter{
+  position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+  padding:clamp(0px,2vw,28px);
+}
+#app{
+  position:relative;
+  width:100%; max-width:920px; height:min(920px,100vh);
+  max-height:100vh;
+  background:linear-gradient(180deg,var(--ink) 0%, #100D14 100%);
+  box-shadow:0 40px 120px rgba(0,0,0,.7), 0 0 0 1px rgba(201,161,90,.12);
+  overflow:hidden;
+  border-radius:0;
+}
+@media (min-width:640px){ #app{ border-radius:var(--radius-m); } }
+
+.scene-bg-layer{
+  position:absolute; inset:0; opacity:0; transition:opacity 1.1s var(--ease-soft);
+  background-size:cover; background-position:center;
+}
+.bg-prologue{ background:
+  radial-gradient(ellipse 600px 400px at 20% 10%, rgba(62,92,118,.25), transparent 55%),
+  linear-gradient(160deg,#191621 0%,#100D14 70%); }
+.bg-basement{ background:
+  radial-gradient(ellipse 500px 380px at 80% 0%, rgba(201,161,90,.14), transparent 55%),
+  linear-gradient(165deg,#1B1620 0%,#100D14 75%); }
+.bg-thrift{ background:
+  radial-gradient(ellipse 550px 400px at 15% 100%, rgba(168,83,50,.18), transparent 60%),
+  linear-gradient(150deg,#1E1720 0%,#12101A 75%); }
+.bg-grey{ background:
+  radial-gradient(ellipse 700px 500px at 50% 0%, rgba(120,120,130,.10), transparent 60%),
+  linear-gradient(180deg,#171A1E 0%,#0E1013 80%); }
+.bg-atelier{ background:
+  radial-gradient(ellipse 500px 380px at 85% 15%, rgba(122,79,145,.22), transparent 55%),
+  linear-gradient(160deg,#1A1622 0%,#100D14 75%); }
+.bg-spire{ background:
+  radial-gradient(ellipse 800px 600px at 50% -10%, rgba(201,161,90,.20), transparent 60%),
+  linear-gradient(180deg,#191420 0%,#0D0B10 80%); }
+
+/* ============================================================
+   Screen manager
+   ============================================================ */
+.screen{
+  position:absolute; inset:0;
+  opacity:0; pointer-events:none;
+  transform:translateY(14px);
+  transition:opacity .5s var(--ease-soft), transform .5s var(--ease-soft);
+  display:flex; flex-direction:column;
+}
+.screen.active{ opacity:1; pointer-events:auto; transform:translateY(0); z-index:5; }
+
+/* running-stitch signature motif, reused across several screens */
+.stitch-rule{ width:100%; height:14px; display:block; }
+.stitch-rule path{
+  fill:none; stroke:var(--brass); stroke-width:2; stroke-linecap:round;
+  stroke-dasharray:6 7; opacity:.85;
+}
+.stitch-rule.animate path{
+  stroke-dashoffset:200;
+  animation:stitchDraw 1.6s var(--ease) forwards;
+}
+@keyframes stitchDraw{ to{ stroke-dashoffset:0; } }
+
+/* ============================================================
+   HUD
+   ============================================================ */
+#hud{
+  position:absolute; top:0; left:0; right:0; z-index:30;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:16px 20px; opacity:0; pointer-events:none;
+  transition:opacity .5s ease;
+}
+#hud.show{ opacity:1; pointer-events:auto; }
+.hud-chip{
+  display:flex; align-items:center; gap:8px;
+  font-size:.68rem; letter-spacing:.14em; text-transform:uppercase; color:var(--parchment-dim);
+  background:rgba(20,17,26,.55); border:1px solid rgba(201,161,90,.22);
+  padding:7px 12px; border-radius:20px; backdrop-filter:blur(6px);
+}
+.hud-chip b{ color:var(--brass-bright); font-weight:600; letter-spacing:.02em; }
+#journalBtn{
+  cursor:pointer; display:flex; align-items:center; gap:7px;
+  background:rgba(20,17,26,.55); border:1px solid rgba(201,161,90,.3);
+  color:var(--parchment); padding:7px 14px; border-radius:20px;
+  font-size:.68rem; letter-spacing:.14em; text-transform:uppercase;
+  transition:background .25s ease, border-color .25s ease, transform .25s ease;
+  backdrop-filter:blur(6px);
+}
+#journalBtn:hover{ background:rgba(201,161,90,.16); border-color:var(--brass); transform:translateY(-1px); }
+#journalBtn svg{ width:13px; height:13px; }
+
+/* ============================================================
+   Journal / Codex overlay
+   ============================================================ */
+#journalOverlay{
+  position:absolute; inset:0; z-index:60;
+  background:rgba(8,7,10,.72); backdrop-filter:blur(3px);
+  display:flex; align-items:center; justify-content:center;
+  opacity:0; pointer-events:none; transition:opacity .4s var(--ease-soft);
+}
+#journalOverlay.open{ opacity:1; pointer-events:auto; }
+.journal-panel{
+  width:min(560px,88%); max-height:78%; overflow-y:auto;
+  background:var(--ink-2); border:1px solid rgba(201,161,90,.25); border-radius:var(--radius-l);
+  padding:26px 26px 30px; transform:scale(.94) translateY(10px); transition:transform .4s var(--ease);
+  box-shadow:0 30px 80px rgba(0,0,0,.55);
+}
+#journalOverlay.open .journal-panel{ transform:scale(1) translateY(0); }
+.journal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+.journal-header h2{ font-family:var(--font-display); font-weight:400; font-size:1.5rem; color:var(--brass-bright); margin:0; letter-spacing:.02em; }
+.journal-close{
+  cursor:pointer; width:30px; height:30px; border-radius:50%; border:1px solid rgba(201,161,90,.3);
+  background:transparent; color:var(--parchment-dim); font-size:1rem; line-height:1;
+  display:flex; align-items:center; justify-content:center; transition:all .2s ease;
+}
+.journal-close:hover{ background:rgba(201,161,90,.15); color:var(--brass-bright); }
+.journal-sub{ color:var(--parchment-faint); font-size:.8rem; margin:0 0 18px; font-style:italic; }
+.journal-entry{ padding:14px 0; border-top:1px solid rgba(201,161,90,.12); }
+.journal-entry:first-of-type{ border-top:none; }
+.journal-entry h4{ font-family:var(--font-display); font-weight:400; font-size:1.05rem; color:var(--parchment); margin:0 0 5px; }
+.journal-entry p{ font-size:.86rem; line-height:1.55; color:var(--parchment-dim); margin:0; }
+.journal-empty{ color:var(--parchment-faint); font-size:.85rem; font-style:italic; padding:20px 0; text-align:center; }
+
+/* ============================================================
+   Title screen
+   ============================================================ */
+#screen-title{ align-items:center; justify-content:center; text-align:center; padding:32px; position:relative; overflow:hidden; }
+.title-particles{ position:absolute; inset:0; pointer-events:none; }
+.title-particle{
+  position:absolute; opacity:.5; color:var(--brass);
+  animation:driftParticle linear infinite;
+}
+@keyframes driftParticle{
+  0%{ transform:translateY(10vh) translateX(0) rotate(0deg); opacity:0; }
+  10%{ opacity:.55; }
+  90%{ opacity:.4; }
+  100%{ transform:translateY(-70vh) translateX(30px) rotate(220deg); opacity:0; }
+}
+.title-eyebrow{
+  font-size:.72rem; letter-spacing:.32em; text-transform:uppercase; color:var(--brass);
+  margin:0 0 18px; opacity:0; animation:riseIn .8s var(--ease) .1s forwards;
+}
+.title-name{
+  font-family:var(--font-display); font-weight:400; font-size:clamp(3.2rem,11vw,5.6rem);
+  margin:0; letter-spacing:.03em; color:var(--parchment);
+  text-shadow:0 0 60px rgba(201,161,90,.25);
+  opacity:0; animation:riseIn 1s var(--ease) .25s forwards;
+}
+.title-tag{
+  font-family:var(--font-display); font-style:italic; font-size:clamp(.95rem,2.4vw,1.15rem);
+  color:var(--parchment-dim); margin:14px 0 40px;
+  opacity:0; animation:riseIn .9s var(--ease) .55s forwards;
+}
+@keyframes riseIn{ from{ opacity:0; transform:translateY(16px); } to{ opacity:1; transform:translateY(0); } }
+
+.title-form{ opacity:0; animation:riseIn .9s var(--ease) .8s forwards; display:flex; flex-direction:column; align-items:center; gap:18px; }
+.name-field-wrap{ display:flex; flex-direction:column; gap:8px; align-items:center; }
+.name-field-label{ font-size:.68rem; letter-spacing:.22em; text-transform:uppercase; color:var(--parchment-faint); }
+#nameInput{
+  background:rgba(237,227,211,.05); border:1px solid rgba(201,161,90,.35); border-radius:var(--radius-s);
+  color:var(--parchment); font-family:var(--font-display); font-size:1.2rem; text-align:center;
+  padding:9px 18px; width:220px; outline:none; transition:border-color .25s ease, background .25s ease;
+}
+#nameInput:focus{ border-color:var(--brass); background:rgba(237,227,211,.08); }
+#nameInput::placeholder{ color:var(--parchment-faint); opacity:.6; }
+
+.btn{
+  cursor:pointer; font-family:var(--font-body); font-size:.78rem; letter-spacing:.18em; text-transform:uppercase;
+  padding:14px 34px; border-radius:30px; border:1px solid transparent;
+  transition:transform .28s var(--ease), box-shadow .28s var(--ease), background .28s ease, border-color .28s ease;
+}
+.btn:focus-visible{ outline:2px solid var(--brass-bright); outline-offset:3px; }
+.btn-primary{ background:linear-gradient(135deg,var(--brass),#B58A45); color:#1A140A; font-weight:600; box-shadow:0 10px 30px rgba(201,161,90,.25); }
+.btn-primary:hover{ transform:translateY(-2px); box-shadow:0 14px 38px rgba(201,161,90,.4); }
+.btn-primary:active{ transform:translateY(0); }
+.btn-ghost{ background:transparent; border-color:rgba(237,227,211,.28); color:var(--parchment-dim); }
+.btn-ghost:hover{ border-color:var(--brass); color:var(--brass-bright); transform:translateY(-2px); }
+.title-hint{ margin-top:22px; font-size:.72rem; color:var(--parchment-faint); opacity:0; animation:riseIn .9s var(--ease) 1.05s forwards; }
+
+/* ============================================================
+   Chapter card
+   ============================================================ */
+#screen-chaptercard{ align-items:center; justify-content:center; text-align:center; cursor:pointer; }
+.chapter-eyebrow{ font-size:.7rem; letter-spacing:.3em; text-transform:uppercase; color:var(--brass); margin:0 0 14px; }
+.chapter-title{ font-family:var(--font-display); font-weight:400; font-size:clamp(2.2rem,6vw,3.2rem); margin:0; color:var(--parchment); }
+.chapter-sub{ font-family:var(--font-display); font-style:italic; color:var(--parchment-dim); margin-top:12px; font-size:1.05rem; }
+.chapter-divider{ width:120px; margin:26px auto; }
+.chapter-continue{ margin-top:30px; font-size:.68rem; letter-spacing:.2em; text-transform:uppercase; color:var(--parchment-faint); }
+.cc-inner{ opacity:0; transform:translateY(10px); animation:riseIn .9s var(--ease) .15s forwards; padding:20px; }
+
+/* ============================================================
+   Dialogue screen
+   ============================================================ */
+#screen-dialogue{ justify-content:flex-end; padding:0; }
+.dlg-stage{ flex:1; position:relative; }
+.dlg-box{
+  position:relative; margin:0 20px 26px; padding:24px 26px 22px;
+  background:rgba(20,17,26,.82); backdrop-filter:blur(8px);
+  border:1px solid rgba(201,161,90,.22); border-radius:var(--radius-l);
+  display:flex; gap:20px; align-items:flex-start; cursor:pointer;
+  box-shadow:0 20px 50px rgba(0,0,0,.4);
+  opacity:0; transform:translateY(16px) scale(.98);
+  animation:dlgIn .5s var(--ease) forwards;
+}
+@keyframes dlgIn{ to{ opacity:1; transform:translateY(0) scale(1); } }
+.dlg-portrait-wrap{
+  flex:0 0 auto; width:78px; height:86px; border-radius:12px; overflow:hidden;
+  background:var(--ink-3); border:1px solid rgba(201,161,90,.25);
+  display:flex; align-items:center; justify-content:center;
+}
+.dlg-portrait-wrap svg{ width:100%; height:100%; display:block; }
+.dlg-portrait-wrap.narration{ display:none; }
+.dlg-box.narration-line .dlg-portrait-wrap{ display:none; }
+.dlg-text-col{ flex:1; min-width:0; }
+.dlg-name{ font-family:var(--font-display); color:var(--brass-bright); font-size:.95rem; margin:0 0 6px; letter-spacing:.02em; }
+.dlg-text{ font-size:1rem; line-height:1.62; color:var(--parchment); min-height:1.62em; }
+.dlg-text.narration{ font-style:italic; color:var(--parchment-dim); }
+.dlg-advance-hint{
+  position:absolute; bottom:8px; right:20px; font-size:.62rem; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--parchment-faint); opacity:.7; animation:hintPulse 1.8s ease-in-out infinite;
+}
+@keyframes hintPulse{ 0%,100%{ opacity:.35; } 50%{ opacity:.8; } }
+.dlg-choices{ margin:0 20px 26px; display:flex; flex-direction:column; gap:10px; }
+.dlg-choice-btn{
+  text-align:left; cursor:pointer; background:rgba(201,161,90,.06); border:1px solid rgba(201,161,90,.3);
+  color:var(--parchment); padding:13px 18px; border-radius:var(--radius-m); font-size:.9rem; font-family:var(--font-body);
+  transition:background .22s ease, border-color .22s ease, transform .22s ease;
+  opacity:0; transform:translateX(-8px); animation:choiceIn .5s var(--ease) forwards;
+}
+.dlg-choice-btn:hover{ background:rgba(201,161,90,.16); border-color:var(--brass); transform:translateX(2px); }
+@keyframes choiceIn{ to{ opacity:1; transform:translateX(0); } }
+
+/* shared portrait svg rendering */
+.portrait-svg{ width:100%; height:100%; display:block; }
+
+/* generic screen header used across minigame screens */
+.screen-header{ padding:70px 26px 6px; text-align:center; }
+.screen-kicker{ font-size:.66rem; letter-spacing:.26em; text-transform:uppercase; color:var(--brass); margin:0 0 8px; }
+.screen-title-sm{ font-family:var(--font-display); font-weight:400; font-size:1.5rem; color:var(--parchment); margin:0; }
+.screen-instructions{ font-size:.82rem; color:var(--parchment-dim); margin:10px auto 0; max-width:420px; line-height:1.5; }
+
+/* ============================================================
+   Echo Reading (needle gauge minigame)
+   ============================================================ */
+.echo-stage{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px; padding:10px 20px 20px; }
+.swatch-card{
+  width:120px; height:86px; border-radius:var(--radius-m); position:relative; overflow:hidden;
+  border:1px solid rgba(201,161,90,.3); box-shadow:0 12px 30px rgba(0,0,0,.35);
+}
+.swatch-card::before{
+  content:""; position:absolute; inset:0;
+  background-image:repeating-linear-gradient(45deg, rgba(0,0,0,.08) 0 6px, transparent 6px 12px);
+}
+.swatch-label{ font-size:.72rem; font-style:italic; color:var(--parchment-dim); text-align:center; max-width:280px; }
+
+.gauge-row{ display:flex; align-items:center; gap:34px; }
+.gauge-track{
+  position:relative; width:46px; height:240px; border-radius:23px;
+  background:linear-gradient(180deg,rgba(237,227,211,.05),rgba(237,227,211,.02));
+  border:1px solid rgba(201,161,90,.25);
+}
+.catch-zone{
+  position:absolute; left:2px; right:2px; border-radius:12px;
+  background:rgba(110,143,108,.22); border:1px solid rgba(110,143,108,.55);
+}
+.catch-zone::after{
+  content:""; position:absolute; left:6px; right:6px; top:38%; bottom:38%;
+  background:rgba(201,161,90,.35); border-radius:8px;
+}
+.needle{
+  position:absolute; left:50%; width:64px; height:5px; margin-left:-32px; top:0;
+  background:linear-gradient(90deg,var(--brass),var(--brass-bright));
+  border-radius:3px; box-shadow:0 0 14px rgba(201,161,90,.65);
+}
+.needle::before, .needle::after{
+  content:""; position:absolute; top:50%; width:5px; height:5px; border-radius:50%;
+  background:var(--brass-bright); transform:translateY(-50%);
+}
+.needle::before{ left:-2px; } .needle::after{ right:-2px; }
+
+.gauge-side{ display:flex; flex-direction:column; align-items:center; gap:16px; }
+.catch-btn{
+  cursor:pointer; width:96px; height:96px; border-radius:50%;
+  background:radial-gradient(circle at 35% 30%, var(--brass-bright), var(--brass) 60%, #93712F 100%);
+  color:#1A140A; font-family:var(--font-body); font-weight:700; letter-spacing:.1em; font-size:.78rem; text-transform:uppercase;
+  border:3px solid rgba(237,227,211,.2);
+  box-shadow:0 14px 34px rgba(201,161,90,.35);
+  transition:transform .15s ease, box-shadow .15s ease;
+}
+.catch-btn:hover{ transform:scale(1.04); }
+.catch-btn:active{ transform:scale(.94); box-shadow:0 6px 16px rgba(201,161,90,.3); }
+
+.fray-meter{ display:flex; gap:5px; align-items:center; }
+.fray-label{ font-size:.62rem; letter-spacing:.16em; text-transform:uppercase; color:var(--parchment-faint); margin-right:4px; }
+.fray-seg{ width:16px; height:6px; border-radius:3px; background:rgba(237,227,211,.12); transition:background .3s ease, box-shadow .3s ease; }
+.fray-seg.lit{ background:var(--ember); box-shadow:0 0 8px rgba(168,83,50,.7); }
+
+.catch-feedback{
+  position:absolute; font-family:var(--font-display); font-size:1rem; font-weight:400; pointer-events:none;
+  animation:feedbackFloat 1s var(--ease) forwards; white-space:nowrap;
+}
+@keyframes feedbackFloat{ 0%{ opacity:0; transform:translateY(0) scale(.9); } 15%{ opacity:1; transform:translateY(-6px) scale(1); } 100%{ opacity:0; transform:translateY(-46px) scale(1.02); } }
+
+.fragment-tray{ display:flex; gap:10px; min-height:44px; align-items:center; flex-wrap:wrap; justify-content:center; }
+.frag-chip{
+  width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  border:1.5px solid rgba(237,227,211,.25); position:relative;
+  animation:chipPop .45s var(--ease) forwards; opacity:0; transform:scale(.4);
+  box-shadow:0 6px 16px rgba(0,0,0,.35);
+}
+@keyframes chipPop{ to{ opacity:1; transform:scale(1); } }
+.frag-chip svg{ width:19px; height:19px; }
+.echo-continue-wrap{ min-height:56px; display:flex; align-items:center; justify-content:center; }
+
+/* ============================================================
+   Pattern Cutting minigame
+   ============================================================ */
+.cut-stage{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; padding:6px 20px 20px; }
+.cut-canvas{
+  position:relative; width:min(380px,86vw); height:280px;
+  background:
+    repeating-linear-gradient(0deg, rgba(237,227,211,.05) 0 1px, transparent 1px 24px),
+    repeating-linear-gradient(90deg, rgba(237,227,211,.05) 0 1px, transparent 1px 24px),
+    rgba(237,227,211,.02);
+  border:1px dashed rgba(201,161,90,.3); border-radius:var(--radius-m);
+}
+.pattern-outline{ position:absolute; inset:0; width:100%; height:100%; }
+.pattern-outline path{ fill:rgba(201,161,90,.05); stroke:var(--brass); stroke-width:1.4; stroke-dasharray:5 5; }
+.cut-point{
+  position:absolute; width:14px; height:14px; margin:-7px; border-radius:50%;
+  background:var(--parchment); box-shadow:0 0 0 3px rgba(237,227,211,.15);
+  cursor:pointer; z-index:2;
+}
+.cut-point.done{ background:var(--good); }
+.cut-point.pending{ opacity:.35; pointer-events:none; }
+.cut-ring{
+  position:absolute; inset:-22px; border-radius:50%; border:2px solid var(--brass-bright);
+  transform:scale(3); opacity:.9; pointer-events:none;
+}
+.cut-result-label{
+  position:absolute; top:-26px; left:50%; transform:translateX(-50%); white-space:nowrap;
+  font-family:var(--font-display); font-size:.85rem; opacity:0; pointer-events:none;
+}
+.cut-result-label.show{ animation:feedbackFloat 1s var(--ease) forwards; }
+.cut-progress{ display:flex; gap:8px; }
+.cut-progress-dot{ width:8px; height:8px; border-radius:50%; background:rgba(237,227,211,.15); transition:background .3s ease; }
+.cut-progress-dot.active{ background:var(--brass); box-shadow:0 0 8px rgba(201,161,90,.6); }
+.cut-progress-dot.filled{ background:var(--good); }
+
+/* ============================================================
+   Assembly screen
+   ============================================================ */
+#screen-assembly{ padding:0; }
+.assembly-body{
+  flex:1; display:flex; gap:0; padding:64px 22px 20px; align-items:stretch;
+}
+.mannequin-col{ flex:0 0 42%; display:flex; align-items:center; justify-content:center; position:relative; }
+.mannequin-wrap{ position:relative; width:100%; max-width:220px; aspect-ratio:2/3; }
+.mannequin-svg{ position:absolute; inset:0; width:100%; height:100%; }
+.garment-svg .garment-shape{ transition:opacity .5s var(--ease-soft); }
+.garment-svg{ --garment-primary:#D8CFC0; --garment-secondary:#6B6558; }
+.slots-overlay{ position:absolute; inset:0; }
+.echo-slot{
+  position:absolute; width:30px; height:30px; margin:-15px; border-radius:50%;
+  border:1.5px dashed rgba(237,227,211,.35); background:rgba(237,227,211,.03);
+  cursor:pointer; display:flex; align-items:center; justify-content:center;
+  transition:border-color .25s ease, background .25s ease, transform .25s ease;
+}
+.echo-slot:hover{ border-color:var(--brass); transform:scale(1.08); }
+.echo-slot.filled{ border-style:solid; animation:slotGlow 2.6s ease-in-out infinite; }
+@keyframes slotGlow{ 0%,100%{ filter:drop-shadow(0 0 3px currentColor); } 50%{ filter:drop-shadow(0 0 9px currentColor); } }
+.echo-slot svg{ width:17px; height:17px; }
+
+.options-col{ flex:1; display:flex; flex-direction:column; gap:18px; padding-left:26px; min-width:0; overflow-y:auto; }
+.opt-group-label{ font-size:.66rem; letter-spacing:.2em; text-transform:uppercase; color:var(--brass); margin:0 0 9px; }
+.opt-row{ display:flex; gap:9px; flex-wrap:wrap; }
+.opt-card{
+  cursor:pointer; padding:9px 13px; border-radius:var(--radius-m); border:1px solid rgba(237,227,211,.22);
+  background:rgba(237,227,211,.03); font-size:.78rem; color:var(--parchment-dim);
+  transition:all .22s ease; display:flex; align-items:center; gap:7px;
+}
+.opt-card:hover{ border-color:rgba(201,161,90,.5); color:var(--parchment); }
+.opt-card.selected{ border-color:var(--brass); background:rgba(201,161,90,.14); color:var(--brass-bright); }
+.opt-swatch-dot{ width:12px; height:12px; border-radius:50%; flex:0 0 auto; box-shadow:inset 0 0 0 1px rgba(0,0,0,.2); }
+.opt-locked{ opacity:.32; cursor:not-allowed; }
+.opt-locked:hover{ border-color:rgba(237,227,211,.22); color:var(--parchment-dim); }
+
+.frag-tray-row{ display:flex; gap:9px; flex-wrap:wrap; min-height:44px; }
+.frag-chip.trayable{ cursor:pointer; transition:transform .2s ease, opacity .2s ease; }
+.frag-chip.trayable:hover{ transform:translateY(-3px); }
+.frag-chip.used{ opacity:.25; cursor:default; }
+.frag-tray-empty{ font-size:.76rem; color:var(--parchment-faint); font-style:italic; }
+
+.assembly-submit-row{ margin-top:auto; padding-top:14px; display:flex; justify-content:flex-end; }
+
+.assembly-panel{ transition:opacity .45s var(--ease-soft), transform .45s var(--ease-soft); }
+.assembly-panel.hide{ opacity:0; transform:translateY(10px); pointer-events:none; position:absolute; }
+.assembly-reveal{
+  display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:16px;
+  opacity:0; pointer-events:none; position:absolute; inset:0; padding:0 26px;
+}
+.assembly-reveal.show{ opacity:1; pointer-events:auto; position:relative; animation:riseIn .6s var(--ease) forwards; }
+.reveal-summary{ font-size:.86rem; color:var(--parchment-dim); max-width:340px; }
+.reveal-summary b{ color:var(--parchment); font-weight:600; }
+.meter-outer{ width:min(320px,80%); height:14px; border-radius:8px; background:rgba(237,227,211,.08); overflow:hidden; border:1px solid rgba(201,161,90,.2); }
+.meter-fill{ height:100%; width:0%; border-radius:8px; background:linear-gradient(90deg,var(--thread-blue),var(--brass) 60%,var(--brass-bright)); transition:width 1.3s var(--ease); }
+.meter-score{ font-family:var(--font-display); font-size:2.1rem; color:var(--parchment); }
+.meter-tier{ font-size:.72rem; letter-spacing:.2em; text-transform:uppercase; color:var(--brass-bright); }
+
+.burst-particle{
+  position:absolute; left:50%; top:50%; width:5px; height:5px; border-radius:50%;
+  background:var(--brass-bright); pointer-events:none;
+  animation:burstOut .9s var(--ease) forwards;
+}
+@keyframes burstOut{ to{ transform:translate(var(--dx),var(--dy)) scale(0); opacity:0; } }
+
+/* ============================================================
+   Ending screen
+   ============================================================ */
+#screen-ending{ align-items:center; justify-content:center; text-align:center; padding:40px 30px; overflow-y:auto; }
+.ending-inner{ opacity:0; animation:riseIn 1s var(--ease) .2s forwards; max-width:560px; }
+.ending-kicker{ font-size:.7rem; letter-spacing:.3em; text-transform:uppercase; color:var(--brass); margin-bottom:14px; }
+.ending-title{ font-family:var(--font-display); font-weight:400; font-size:clamp(2rem,5.5vw,2.8rem); margin:0 0 22px; }
+.ending-text{ font-size:.98rem; line-height:1.75; color:var(--parchment-dim); text-align:left; }
+.ending-text p{ margin:0 0 16px; }
+.ending-signoff{ font-family:var(--font-display); font-style:italic; color:var(--parchment); margin-top:22px; }
+.ending-actions{ margin-top:34px; display:flex; gap:14px; justify-content:center; flex-wrap:wrap; }
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+@media (max-width:640px){
+  .assembly-body{ flex-direction:column; padding-top:60px; overflow-y:auto; }
+  .mannequin-col{ flex:0 0 auto; padding:6px 0 10px; }
+  .mannequin-wrap{ max-width:150px; }
+  .options-col{ padding-left:0; overflow-y:visible; }
+  .screen-header{ padding:56px 20px 4px; }
+  .dlg-portrait-wrap{ width:60px; height:66px; }
+  .gauge-row{ gap:20px; }
+  .catch-btn{ width:80px; height:80px; font-size:.68rem; }
+  #hud{ padding:12px 14px; }
+  .hud-chip{ padding:6px 9px; font-size:.6rem; }
+  #journalBtn span.jlabel{ display:none; }
+}
+@media (max-height:680px){
+  .screen-header{ padding-top:44px; }
+  .dlg-box{ margin-bottom:14px; }
+}
+</style>
+</head>
+<body>
+<div id="stageOuter">
+  <div id="app">
+    <div class="scene-bg-layer bg-prologue" id="bgLayer0"></div>
+    <div class="scene-bg-layer" id="bgLayer1"></div>
+    <div class="grain"></div>
+
+    <!-- HUD -->
+    <div id="hud">
+      <div class="hud-chip">Ch. <b id="hudChapter">—</b></div>
+      <div id="journalBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4h11a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3V4Z"/><path d="M18 7h2v13a2 2 0 0 1-2 2H7"/></svg>
+        <span class="jlabel">Journal</span>
+      </div>
+      <div class="hud-chip">Renown <b id="hudRenown">0</b></div>
+    </div>
+
+    <!-- Journal / Codex overlay -->
+    <div id="journalOverlay">
+      <div class="journal-panel">
+        <div class="journal-header">
+          <h2>The Codex</h2>
+          <div class="journal-close" id="journalCloseBtn">✕</div>
+        </div>
+        <p class="journal-sub">What you've learned of the Hemline, so far.</p>
+        <div id="journalList"></div>
+      </div>
+    </div>
+
+    <!-- Title screen -->
+    <section class="screen active" id="screen-title">
+      <div class="title-particles" id="titleParticles"></div>
+      <p class="title-eyebrow">A Stitched Story</p>
+      <h1 class="title-name">HEMLINE</h1>
+      <p class="title-tag">Every thread remembers something. Are your hands ready to listen?</p>
+      <div class="title-form">
+        <div class="name-field-wrap">
+          <label class="name-field-label" for="nameInput">Your name, apprentice</label>
+          <input type="text" id="nameInput" maxlength="16" placeholder="Kai" autocomplete="off" />
+        </div>
+        <button class="btn btn-primary" id="beginBtn">Begin</button>
+      </div>
+      <p class="title-hint">One sitting, about 15–20 minutes. Click or tap through everything — no reading required elsewhere.</p>
+    </section>
+
+    <!-- Chapter card -->
+    <section class="screen" id="screen-chaptercard">
+      <div class="cc-inner">
+        <p class="chapter-eyebrow" id="chapterCardEyebrow">Chapter One</p>
+        <h2 class="chapter-title" id="chapterCardTitle">The Basement Bolt</h2>
+        <svg class="stitch-rule chapter-divider" viewBox="0 0 120 14"><path d="M2,7 Q30,-3 60,7 T118,7"/></svg>
+        <p class="chapter-sub" id="chapterCardSubtitle"></p>
+      </div>
+      <p class="chapter-continue">Click to continue ▸</p>
+    </section>
+
+    <!-- Dialogue screen -->
+    <section class="screen" id="screen-dialogue">
+      <div class="dlg-stage"></div>
+      <div class="dlg-box" id="dlgBox">
+        <div class="dlg-portrait-wrap" id="dlgPortraitWrap"></div>
+        <div class="dlg-text-col">
+          <p class="dlg-name" id="dlgName"></p>
+          <p class="dlg-text" id="dlgText"></p>
+        </div>
+        <div class="dlg-advance-hint" id="dlgHint">Click to continue ▸</div>
+      </div>
+      <div class="dlg-choices" id="dlgChoices"></div>
+    </section>
+
+    <!-- Echo Reading screen -->
+    <section class="screen" id="screen-echo">
+      <div class="screen-header">
+        <p class="screen-kicker">Listening to the Cloth</p>
+        <h2 class="screen-title-sm" id="echoTitle">—</h2>
+        <p class="screen-instructions">Press Catch when the needle rests inside the pale band. Miss three times and the cloth grows too loud to hold.</p>
+      </div>
+      <div class="echo-stage">
+        <div class="swatch-card" id="swatchCard"></div>
+        <p class="swatch-label" id="swatchLabel"></p>
+        <div class="gauge-row">
+          <div class="gauge-track" id="gaugeTrack">
+            <div class="catch-zone" id="catchZone"></div>
+            <div class="needle" id="needle"></div>
+          </div>
+          <div class="gauge-side">
+            <button class="catch-btn" id="catchBtn">Catch</button>
+            <div class="fray-meter"><span class="fray-label">Fray</span><div class="fray-seg" id="fraySeg0"></div><div class="fray-seg" id="fraySeg1"></div><div class="fray-seg" id="fraySeg2"></div></div>
+          </div>
+        </div>
+        <div class="fragment-tray" id="echoFragTray"></div>
+        <div class="echo-continue-wrap" id="echoContinueWrap"></div>
+      </div>
+    </section>
+
+    <!-- Cutting screen -->
+    <section class="screen" id="screen-cut">
+      <div class="screen-header">
+        <p class="screen-kicker">Cutting the Pattern</p>
+        <h2 class="screen-title-sm" id="cutTitle">—</h2>
+        <p class="screen-instructions">Click each point the instant the ring closes around it. Early or late, and the edge comes out rough.</p>
+      </div>
+      <div class="cut-stage">
+        <div class="cut-canvas" id="cutCanvas">
+          <svg class="pattern-outline" id="patternOutline" viewBox="0 0 380 280"></svg>
+          <div id="cutPointsContainer"></div>
+        </div>
+        <div class="cut-progress" id="cutProgress"></div>
+        <div class="echo-continue-wrap" id="cutContinueWrap"></div>
+      </div>
+    </section>
+
+    <!-- Assembly screen -->
+    <section class="screen" id="screen-assembly">
+      <div class="screen-header" style="padding-bottom:0;">
+        <p class="screen-kicker">At the Worktable</p>
+        <h2 class="screen-title-sm" id="assemblyTitle">—</h2>
+      </div>
+      <div class="assembly-body assembly-panel" id="assemblyOptionsPanel">
+        <div class="mannequin-col">
+          <div class="mannequin-wrap">
+            <svg class="mannequin-svg" id="mannequinBase" viewBox="0 0 240 360"></svg>
+            <svg class="mannequin-svg garment-svg" id="garmentLayer" viewBox="0 0 240 360"></svg>
+            <div class="slots-overlay" id="slotsOverlay"></div>
+          </div>
+        </div>
+        <div class="options-col">
+          <div>
+            <p class="opt-group-label">Silhouette</p>
+            <div class="opt-row" id="silhouetteOptions"></div>
+          </div>
+          <div>
+            <p class="opt-group-label">Palette</p>
+            <div class="opt-row" id="paletteOptions"></div>
+          </div>
+          <div>
+            <p class="opt-group-label">Echoes Gathered</p>
+            <div class="frag-tray-row" id="fragmentTray"></div>
+          </div>
+          <div class="assembly-submit-row">
+            <button class="btn btn-primary" id="submitLookBtn">Submit the Look</button>
+          </div>
+        </div>
+      </div>
+      <div class="assembly-reveal" id="assemblyReveal">
+        <p class="reveal-summary" id="revealSummary"></p>
+        <div class="meter-outer"><div class="meter-fill" id="meterFill"></div></div>
+        <div class="meter-score" id="meterScore">0</div>
+        <div class="meter-tier" id="meterTier">—</div>
+        <button class="btn btn-primary" id="continueRevealBtn" style="margin-top:10px;">Continue</button>
+      </div>
+    </section>
+
+    <!-- Ending screen -->
+    <section class="screen" id="screen-ending">
+      <div class="ending-inner">
+        <p class="ending-kicker">— Fin —</p>
+        <h2 class="ending-title" id="endingTitle"></h2>
+        <div class="ending-text" id="endingText"></div>
+        <p class="ending-signoff" id="endingSignoff"></p>
+        <div class="ending-actions">
+          <button class="btn btn-primary" id="playAgainBtn">Play Again</button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ============================================================================
+   HEMLINE — engine
+   A single self-contained script. Organized top to bottom as:
+   data (echoes, silhouettes, palettes, portraits, clients, dialogue, codex)
+   -> state -> core helpers -> dialogue engine -> minigames -> assembly
+   -> resonance -> commission/showcase runners -> ending -> boot
+   ============================================================================ */
+
+const $ = id => document.getElementById(id);
+const clamp = (v,lo,hi) => Math.max(lo, Math.min(hi, v));
+const wait = ms => new Promise(res => setTimeout(res, ms));
+
+/* ---------------------------------------------------------------- Echoes */
+const ECHO_TYPES = {
+  joy: { id:'joy', name:'Joy', color:'#E3B23C',
+    desc:'A warmth that arrives uninvited in the weave, and stays anyway.',
+    sigil:function(c){ return '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.1" fill="'+c+'"/><g stroke="'+c+'" stroke-width="1.6" stroke-linecap="round">'
+      +'<line x1="12" y1="2" x2="12" y2="5.2"/><line x1="12" y1="18.8" x2="12" y2="22"/>'
+      +'<line x1="2" y1="12" x2="5.2" y2="12"/><line x1="18.8" y1="12" x2="22" y2="12"/>'
+      +'<line x1="4.9" y1="4.9" x2="7.1" y2="7.1"/><line x1="16.9" y1="16.9" x2="19.1" y2="19.1"/>'
+      +'<line x1="19.1" y1="4.9" x2="16.9" y2="7.1"/><line x1="7.1" y1="16.9" x2="4.9" y2="19.1"/></g></svg>'; } },
+  grief: { id:'grief', name:'Grief', color:'#6E8CAA',
+    desc:'The shape a person leaves behind in cloth, long after they leave the room.',
+    sigil:function(c){ return '<svg viewBox="0 0 24 24"><path d="M12,2 C12,2 5,12.5 5,16.5 A7,7 0 0,0 19,16.5 C19,12.5 12,2 12,2 Z" fill="'+c+'" opacity="0.92"/></svg>'; } },
+  defiance: { id:'defiance', name:'Defiance', color:'#C24956',
+    desc:'The stitch that refuses to fray, no matter how hard the wind pulls.',
+    sigil:function(c){ return '<svg viewBox="0 0 24 24"><polygon points="13,2 5,13.5 11,13.5 9.5,22 19,10 12.5,10" fill="'+c+'"/></svg>'; } },
+  love: { id:'love', name:'Love', color:'#D48CA1',
+    desc:'Not decoration. A repair — something mended so it could be worn again.',
+    sigil:function(c){ return '<svg viewBox="0 0 24 24"><path d="M12,20.5 C12,20.5 3.5,14 3.5,8.2 A4.7,4.7 0 0,1 12,5.6 A4.7,4.7 0 0,1 20.5,8.2 C20.5,14 12,20.5 12,20.5 Z" fill="none" stroke="'+c+'" stroke-width="1.8" stroke-dasharray="2.6 2.2"/></svg>'; } },
+  nostalgia: { id:'nostalgia', name:'Nostalgia', color:'#BC9B69',
+    desc:'A room you can only visit with your eyes closed, and only for a moment.',
+    sigil:function(c){ return '<svg viewBox="0 0 24 24"><path d="M6,4 H18 C18,9 13,10.5 13,12 C13,13.5 18,15 18,20 H6 C6,15 11,13.5 11,12 C11,10.5 6,9 6,4 Z" fill="'+c+'" opacity="0.9"/></svg>'; } },
+  resolve: { id:'resolve', name:'Resolve', color:'#5D9585',
+    desc:'The decision made quietly, before anyone was around to applaud it.',
+    sigil:function(c){ return '<svg viewBox="0 0 24 24"><polygon points="12,2.5 20,13 14.5,13 14.5,21.5 9.5,21.5 9.5,13 4,13" fill="'+c+'"/></svg>'; } }
+};
+
+/* ---------------------------------------------------------------- Portraits */
+const HAIR_SHAPES = {
+  bun: c => '<path d="M23,42 Q24,16 50,16 Q76,16 77,42 Q77,28 50,26 Q23,28 23,42 Z" fill="'+c+'"/><circle cx="50" cy="13" r="7.5" fill="'+c+'"/>',
+  slicked: c => '<path d="M23,40 Q24,14 50,14 Q76,14 77,40 Q77,23 50,21 Q23,23 23,40 Z" fill="'+c+'"/>',
+  messy: c => '<circle cx="34" cy="25" r="9" fill="'+c+'"/><circle cx="50" cy="18" r="10.5" fill="'+c+'"/><circle cx="66" cy="25" r="9" fill="'+c+'"/><circle cx="43" cy="15" r="7" fill="'+c+'"/><circle cx="57" cy="15" r="7" fill="'+c+'"/>',
+  thin: c => '<path d="M25,38 Q27,29 35,25 M65,25 Q73,29 75,38" stroke="'+c+'" stroke-width="4.5" fill="none" stroke-linecap="round"/>',
+  long: c => '<path d="M20,52 Q17,14 50,14 Q83,14 80,52 L73,52 Q76,21 50,21 Q24,21 27,52 Z" fill="'+c+'"/>',
+  short: c => '<path d="M24,38 Q25,17 50,17 Q75,17 76,38 Q75,24 50,23 Q25,24 24,38 Z" fill="'+c+'"/>'
+};
+const CHARACTERS = {
+  kai:      { name:'You',            bg:'#33404A', skin:'#CBA073', collar:'#16202A', hair:'short',   hairColor:'#2E2018' },
+  vesper:   { name:'Vesper Loom',    bg:'#3A2C46', skin:'#C89A78', collar:'#241C2C', hair:'bun',     hairColor:'#C7C2C0' },
+  nettle:   { name:'Nettle',         bg:'#5C3A2E', skin:'#8A5A3E', collar:'#2A1C16', hair:'messy',   hairColor:'#D97B3E' },
+  argent:   { name:'Roman Argent',   bg:'#2A3440', skin:'#D8B48C', collar:'#101820', hair:'slicked', hairColor:'#1C1C22' },
+  tomas:    { name:'Tomas',          bg:'#3E3226', skin:'#C99A6E', collar:'#241C14', hair:'thin',    hairColor:'#CFCABF' },
+  oskar:    { name:'Oskar Vantry',   bg:'#2E3A44', skin:'#E0C29E', collar:'#151E24', hair:'short',   hairColor:'#3A2A1E' },
+  thessaly: { name:'Thessaly Byrne', bg:'#402A44', skin:'#B98868', collar:'#231627', hair:'bun',     hairColor:'#5C4638' },
+  corvin:   { name:'Corvin Ashe',    bg:'#26303A', skin:'#B99878', collar:'#12181E', hair:'long',    hairColor:'#B8B4AC' },
+  stranger: { name:'The Stranger',   bg:'#3A3228', skin:'#C6996E', collar:'#1C1710', hair:'short',   hairColor:'#4A3626' }
+};
+function portraitSVG(charId){
+  const c = CHARACTERS[charId];
+  if(!c) return '';
+  const hairFn = HAIR_SHAPES[c.hair];
+  const hairMarkup = hairFn ? hairFn(c.hairColor) : '';
+  return '<svg class="portrait-svg" viewBox="0 0 100 110" preserveAspectRatio="xMidYMax slice">'
+    +'<rect width="100" height="110" fill="'+c.bg+'"/>'
+    +'<path d="M18,114 Q18,80 50,75 Q82,80 82,114 Z" fill="'+c.collar+'"/>'
+    +'<circle cx="50" cy="46" r="25" fill="'+c.skin+'"/>'
+    + hairMarkup
+    +'</svg>';
+}
+
+/* ---------------------------------------------------------------- Silhouettes & Palettes */
+const SILHOUETTES = {
+  draped: { id:'draped', name:'Flowing Drape', unlockDefault:true,
+    svg:'<path class="garment-shape" d="M72,92 Q120,72 168,92 L180,150 Q192,224 174,292 Q120,312 66,292 Q48,224 60,150 Z" fill="var(--garment-primary)"/>'
+       +'<path class="garment-shape" d="M84,98 Q120,84 156,98 L162,140 Q120,130 78,140 Z" fill="var(--garment-secondary)" opacity="0.35"/>' },
+  tailored: { id:'tailored', name:'Sharp Tailored', unlockDefault:true,
+    svg:'<polygon class="garment-shape" points="80,90 120,76 160,90 172,120 158,292 82,292 68,120" fill="var(--garment-primary)"/>'
+       +'<line class="garment-shape" x1="120" y1="82" x2="120" y2="292" stroke="var(--garment-secondary)" stroke-width="2" opacity="0.6"/>'
+       +'<polygon class="garment-shape" points="95,90 120,78 100,104" fill="var(--garment-secondary)" opacity="0.55"/>'
+       +'<polygon class="garment-shape" points="145,90 120,78 140,104" fill="var(--garment-secondary)" opacity="0.55"/>' },
+  layered: { id:'layered', name:'Layered Drape', unlockDefault:false,
+    svg:'<path class="garment-shape" d="M72,92 Q120,72 168,92 L180,150 Q192,224 174,292 Q120,312 66,292 Q48,224 60,150 Z" fill="var(--garment-primary)"/>'
+       +'<path class="garment-shape" d="M88,96 Q120,82 152,96 L158,178 Q120,192 82,178 Z" fill="var(--garment-secondary)" opacity="0.85"/>' },
+  asymmetric: { id:'asymmetric', name:'Asymmetric Cut', unlockDefault:false,
+    svg:'<polygon class="garment-shape" points="80,90 120,66 162,96 174,128 168,282 98,302 66,120" fill="var(--garment-primary)"/>'
+       +'<line class="garment-shape" x1="66" y1="120" x2="168" y2="282" stroke="var(--garment-secondary)" stroke-width="1.5" opacity="0.5"/>' }
+};
+const PALETTES = {
+  bone:      { id:'bone',      name:'Bone & Ash',    unlockDefault:true,  primary:'#D8CFC0', secondary:'#6B6558' },
+  rosewater: { id:'rosewater', name:'Rosewater',     unlockDefault:true,  primary:'#E3B7B0', secondary:'#C97B92' },
+  ember:     { id:'ember',     name:'Ember Dust',    unlockDefault:false, primary:'#C1663A', secondary:'#7A3420' },
+  midnight:  { id:'midnight',  name:'Midnight Bloom',unlockDefault:false, primary:'#33285C', secondary:'#7A57A0' }
+};
+
+const MANNEQUIN_BASE_SVG =
+  '<ellipse cx="120" cy="346" rx="46" ry="9" fill="#453626"/>'
+ +'<rect x="115" y="298" width="10" height="50" fill="#5C4A34"/>'
+ +'<path d="M85,80 Q120,58 155,80 L165,182 Q160,262 144,300 L96,300 Q80,262 75,182 Z" fill="#E4D7C1"/>'
+ +'<rect x="104" y="52" width="32" height="32" rx="6" fill="#E4D7C1"/>'
+ +'<path d="M85,80 Q120,90 155,80" fill="none" stroke="#B8A688" stroke-width="1" opacity="0.6"/>'
+ +'<path d="M78,180 Q120,192 162,180" fill="none" stroke="#B8A688" stroke-width="1" opacity="0.5"/>'
+ +'<line x1="120" y1="84" x2="120" y2="298" stroke="#B8A688" stroke-width="1" opacity="0.45" stroke-dasharray="3 4"/>';
+
+/* ---------------------------------------------------------------- Commission tuning */
+const COMMISSION_CONFIG = {
+  tomas:    { pulses:4, period:1.85, zoneFrac:0.26, cutPoints:3, cutDurations:[950,850,760] },
+  oskar:    { pulses:4, period:1.5,  zoneFrac:0.21, cutPoints:3, cutDurations:[830,730,640] },
+  thessaly: { pulses:4, period:1.25, zoneFrac:0.18, cutPoints:3, cutDurations:[740,650,560] },
+  nettle:   { pulses:2, period:1.3,  zoneFrac:0.23, cutPoints:1, cutDurations:[680] },
+  corvin:   { pulses:2, period:1.2,  zoneFrac:0.19, cutPoints:1, cutDurations:[640] },
+  stranger: { pulses:2, period:1.3,  zoneFrac:0.23, cutPoints:1, cutDurations:[680] }
+};
+
+/* ---------------------------------------------------------------- Clients */
+const CLIENTS = {
+  tomas: {
+    key:'tomas', char:'tomas', introScript:'tomas_intro',
+    swatchName:"Tomas's old wool blanket", pieceName:"a soft wool scarf",
+    echoPool:['love','nostalgia','joy'],
+    echoWeight:{ love:1.0, nostalgia:0.85, joy:0.4 },
+    paletteWeight:{ rosewater:1.0, ember:0.7, bone:0.15, midnight:0.1 },
+    silhouetteWeight:{ draped:1.0, layered:0.85, tailored:0.3, asymmetric:0.3 },
+    reactions:{
+      perfect:[ {speaker:'tomas', text:"...Oh."}, {speaker:'tomas', text:"She's in here. I don't know how you did that, but she's in here."}, {speaker:'vesper', text:"(a small nod, to {{name}}) Not bad, for a first stitch."} ],
+      strong:[ {speaker:'tomas', text:"It's warm — properly warm. And it doesn't feel like something off a shelf. Thank you, truly."} ],
+      adequate:[ {speaker:'tomas', text:"It's a fine scarf. Kind hands made this. ...It'll keep me warm on the walk, at least."}, {speaker:'vesper', text:"(gently, to {{name}}) First one's rarely perfect. Doesn't mean it wasn't worth making."} ],
+      weak:[ {speaker:'tomas', text:"It's very well sewn. (a pause) I think I just need a little more time with it, to let it feel like mine."}, {speaker:'vesper', text:"Cloth takes longer to trust some hands than others. Yours included. Come on."} ]
+    }
+  },
+  oskar: {
+    key:'oskar', char:'oskar', introScript:'oskar_intro',
+    swatchName:"a scrap of stage curtain", pieceName:"a structured jacket panel",
+    echoPool:['resolve','defiance','joy'],
+    echoWeight:{ resolve:1.0, defiance:0.85, joy:0.3 },
+    paletteWeight:{ ember:1.0, midnight:0.8, rosewater:0.2, bone:0.2 },
+    silhouetteWeight:{ tailored:1.0, asymmetric:0.7, draped:0.25, layered:0.25 },
+    reactions:{
+      perfect:[ {speaker:'oskar', text:"...I don't feel like I'm wearing a costume."}, {speaker:'oskar', text:"I feel like — like myself. Just louder."}, {speaker:'vesper', text:"That's the whole trick. Nobody claps for a costume."} ],
+      strong:[ {speaker:'oskar', text:"This is good. This is really good. I think I can actually walk out there in this."} ],
+      adequate:[ {speaker:'oskar', text:"It's sharp. Handsome, even. I just hope I can live up to it tonight."} ],
+      weak:[ {speaker:'oskar', text:"It's beautiful work. I just don't think it's found me yet — the way you meant it to."}, {speaker:'vesper', text:"Cloth's patient. People rarely are. You'll get there."} ]
+    }
+  },
+  thessaly: {
+    key:'thessaly', char:'thessaly', introScript:'thessaly_intro',
+    swatchName:"a fragment of an old competition gown", pieceName:"a tailored bodice",
+    echoPool:['defiance','nostalgia','grief'],
+    echoWeight:{ defiance:1.0, nostalgia:0.9, grief:0.5 },
+    paletteWeight:{ midnight:1.0, ember:0.85, bone:0.3, rosewater:0.2 },
+    silhouetteWeight:{ tailored:0.9, draped:0.9, layered:0.5, asymmetric:0.5 },
+    reactions:{
+      perfect:[ {speaker:'thessaly', text:"...Well."}, {speaker:'thessaly', text:"Let them look. Let them look and remember exactly why they were afraid to."} ],
+      strong:[ {speaker:'thessaly', text:"This will do more than get me through the door. Thank you — genuinely."} ],
+      adequate:[ {speaker:'thessaly', text:"It's handsome work. I'll wear it with my chin up, regardless of what it says about me."} ],
+      weak:[ {speaker:'thessaly', text:"It's lovely fabric. I don't know that it said what I needed it to. Maybe nothing could have, tonight."}, {speaker:'vesper', text:"(quiet) Some clients bring a wound the cloth can't close alone. Doesn't mean you cut wrong."} ]
+    }
+  },
+  nettle: {
+    key:'nettle', char:'nettle', introScript:'showcase_nettle_intro',
+    swatchName:"a ribbon from Nettle's own coat", pieceName:"a quick showcase piece",
+    echoPool:['joy','love'],
+    echoWeight:{ joy:1.0, love:0.8 },
+    paletteWeight:{ rosewater:1.0, ember:0.7, bone:0.3, midnight:0.3 },
+    silhouetteWeight:{ draped:0.9, layered:0.9, tailored:0.4, asymmetric:0.6 },
+    reactions:{
+      perfect:[ {speaker:'nettle', text:"Okay — WOW. Okay. I take back every sarcastic thing I've ever said about apprentices."}, {speaker:'nettle', text:"I'm wearing this to literally everything for the rest of my life."} ],
+      strong:[ {speaker:'nettle', text:"{{name}}! This is SO good, oh my god, spin me around—"} ],
+      adequate:[ {speaker:'nettle', text:"Ha! I love it, honestly. Very 'me,' in a way I can't fully explain."} ],
+      weak:[ {speaker:'nettle', text:"It's a little stiff on me but whatever, I'll make it work — I make everything work."} ]
+    }
+  },
+  corvin: {
+    key:'corvin', char:'corvin', introScript:'showcase_corvin_intro', followup:'showcase_corvin_reveal',
+    swatchName:"a patron's unnamed fabric", pieceName:"a showcase piece for a stranger",
+    echoPool:['nostalgia','resolve','grief'],
+    echoWeight:{ nostalgia:1.0, resolve:0.8, grief:0.5 },
+    paletteWeight:{ midnight:1.0, bone:0.6, ember:0.4, rosewater:0.2 },
+    silhouetteWeight:{ tailored:0.8, draped:0.8, layered:0.6, asymmetric:0.6 },
+    reactions:{
+      perfect:[ {speaker:'corvin', text:"...\u201cRead the cloth, not the trend.\u201d"}, {speaker:'corvin', text:"(he says it so quietly it takes a moment to land) Someone taught you that line word for word."} ],
+      strong:[ {speaker:'corvin', text:"Mm. There's a phrase worked into this — read the cloth, not the trend — I haven't heard spoken aloud in a very long time."} ],
+      adequate:[ {speaker:'corvin', text:"Careful work. Familiar work, actually. There's a teacher's hand behind yours, even if you can't see it yet."} ],
+      weak:[ {speaker:'corvin', text:"Unfinished, this. But I recognize the instinct underneath it. Someone gave you good instincts."} ]
+    }
+  },
+  stranger: {
+    key:'stranger', char:'stranger', introScript:'showcase_stranger_intro', followup:'showcase_stranger_reveal',
+    swatchName:"a hand-me-down jacket, nothing special", pieceName:"a first real look",
+    echoPool:['joy','defiance','love'],
+    echoWeight:{ joy:0.7, defiance:0.7, love:0.7 },
+    paletteWeight:{ bone:0.6, rosewater:0.6, ember:0.6, midnight:0.6 },
+    silhouetteWeight:{ draped:0.6, tailored:0.6, layered:0.6, asymmetric:0.6 },
+    reactions:{
+      perfect:[ {speaker:'stranger', text:"...Nobody's ever— I mean, I just wandered in. I wasn't even supposed to be back here."}, {speaker:'stranger', text:"(quiet, looking down at the look) I don't want to take it off."} ],
+      strong:[ {speaker:'stranger', text:"This is— wow. I really thought you'd just laugh me out of the back room. Thank you."} ],
+      adequate:[ {speaker:'stranger', text:"This is really nice, actually. Nicer than anything I own. Thank you for even bothering."} ],
+      weak:[ {speaker:'stranger', text:"Oh — this is really kind. I wasn't expecting anything, honestly. Just being back here is more than I thought I'd get."} ]
+    }
+  }
+};
+
+/* ---------------------------------------------------------------- Dialogue scripts */
+const DIALOGUE_SCRIPTS = {
+  prologue: [
+    { narration:true, text:"The Bell Street Laundromat closes at eleven. {{name}} always stays till midnight anyway — someone has to sort what people leave behind." },
+    { speaker:'kai', text:"Another coat nobody's coming back for. Into the donation bin you go." },
+    { narration:true, text:"It's heavier than it looks. Old wool, oil-black, a collar worn smooth by forty years of somebody's neck." },
+    { narration:true, text:"The moment his bare hand closes around the collar, the laundromat goes quiet. Too quiet." },
+    { narration:true, text:"He feels it before he understands it — a wedding he wasn't at. A war he never fought. A goodbye said in a doorway, in the rain. All of it, at once, folded into a coat." },
+    { speaker:'kai', text:"That's — that's not —" },
+    { narration:true, text:"The floor tilts. The fluorescent lights smear into thread. And somewhere very far away, or very close, a bell begins to ring. Not the door bell. Something older." }
+  ],
+  ch1_intro: [
+    { narration:true, text:"He wakes on a cutting table, under a quilt stitched from a thousand mismatched pockets." },
+    { speaker:'vesper', text:"You're drooling on my good felt." },
+    { speaker:'kai', text:"Where — what happened? There was a coat, and then—" },
+    { speaker:'vesper', text:"And then it told you something it shouldn't have been able to tell you. Because you touched it barehanded, like an idiot. Or like a Barehand. Rare, either way." },
+    { speaker:'kai', text:"A bare-what?" },
+    { speaker:'vesper', text:"Most folk round here wear Thimble Gloves from the day they're old enough to dress themselves. Filters the Echoes out of cloth, so a body doesn't drown in forty years of somebody else's Tuesdays. You don't filter anything. You feel all of it. Raw." },
+    { speaker:'vesper', text:"Dangerous. Also, occasionally, useful. Sit up — you're in the Hemline now, and the Hemline doesn't hand out directions twice." },
+    { speaker:'kai', text:"The... Hemline?" },
+    { speaker:'vesper', text:"The seam where this city keeps what it doesn't want to throw away. Every real feeling anybody's ever sewn into a coat ends up here, eventually. I make it into something new. Wearables, we call them — clothes with a pulse. Everything else out there is Flatcloth. Dead weight with buttons." },
+    { speaker:'vesper', text:"You've got hands. Let's see if they're worth anything. There's a scarf that needs making before Tomas gets here — watch closely, I only explain a thing once." }
+  ],
+  tomas_intro: [
+    { narration:true, text:"A bell above the shop door — the ordinary kind, this time." },
+    { speaker:'vesper', text:"Tomas. My oldest customer, and my most patient one. God knows why." },
+    { speaker:'tomas', text:"Vesper. And who's this — new stitches?" },
+    { speaker:'vesper', text:"Barehand. Fresh off the street, if you can believe it." },
+    { speaker:'tomas', text:"Ah. Then he'll understand what I need better than most people would." },
+    { speaker:'tomas', text:"It's for the walk. I do it every year, down by the river, since Miriam. My old scarf's gone thin as a promise. I don't need fancy, understand. I need warm. I need it to feel like her, if that's not a strange thing to ask a stranger." },
+    { speaker:'kai', text:"It's not strange." },
+    { speaker:'vesper', text:"(low, to you only) Don't reach for black just because it's a memorial. Grief doesn't always want to dress like grief. Read the cloth. Read the man. Then decide." }
+  ],
+  ch1_outro: [
+    { narration:true, text:"Tomas folds the scarf over his arm like it might bruise, and the bell rings him back out into the ordinary evening." },
+    { speaker:'vesper', text:"Not a disaster. For a Barehand who didn't know this world existed yesterday, that's practically a compliment, coming from me." },
+    { speaker:'kai', text:"Is it always like that? Just listening, and hoping you heard right?" },
+    { speaker:'vesper', text:"Every single time. Twenty-six years in and I still get it wrong more than the Guild would ever admit to. Sweep the floor. Tomorrow I'm sending you to Thrifter's Row — you'll need fabric a laundromat bin will never give you." }
+  ],
+  ch2_intro: [
+    { narration:true, text:"Thrifter's Row is loud in a way the Basement Bolt never is — stalls stacked three deep with coats that argue with each other about what decade it is." },
+    { narration:true, text:"Someone launches off an overturned crate and lands directly in {{name}}'s path." },
+    { speaker:'nettle', text:"You're the Barehand. Everyone's talking about the Barehand. I'm Nettle, I basically run this entire Row, don't let anyone tell you otherwise—" },
+    { speaker:'nettle', text:"—except maybe Old Hattie at the button stall. She's ninety. She gets a pass." },
+    { speaker:'kai', text:"Vesper sent me for fabric. She didn't mention I'd get, uh, tackled." },
+    { speaker:'nettle', text:"That's just how the Row says hello. C'mon — there's a nervous violin kid asking around for someone who can make him not look like he's about to throw up on stage. Sounds like your problem now." }
+  ],
+  oskar_intro: [
+    { narration:true, text:"He's easy to spot — the only person at the Row standing completely still while everyone else haggles around him." },
+    { speaker:'oskar', text:"Are you the one Nettle mentioned? I need — okay, this is going to sound ridiculous." },
+    { speaker:'oskar', text:"I have a solo. First one. Real hall, real audience, in three days. I don't want to look like I'm pretending to be someone braver than I am. I just want to walk out there and not disappear." },
+    { speaker:'nettle', text:"(whispering, unhelpfully) He's been standing exactly like that for twenty minutes. I timed it." },
+    { speaker:'oskar', text:"Nettle." },
+    { speaker:'nettle', text:"Sorry! Sorry. Go on, work your creepy fabric magic. I'll go find you something with a pulse." }
+  ],
+  argent_first: [
+    { narration:true, text:"A man in a coat with no wrinkles in it — none, anywhere — waits by the Row's central fountain like he's been carved there." },
+    { speaker:'argent', text:"You'd be the Barehand everyone's suddenly so precious about. Roman Argent. Director of Acquisitions, the Silhouette Guild." },
+    { speaker:'kai', text:"I've heard of you, I think. Vesper doesn't say your name so much as spit it." },
+    { speaker:'argent', text:"Vesper spits a lot of names. Practically her love language." },
+    { speaker:'argent', text:"I'll be direct, since your kind usually appreciates that. Barehands are rare, rare is expensive, and expensive is something the Guild is very good at making comfortable. Studio. Salary. Your name on the label. No more sweeping floors for a woman who hasn't shown at the Spire in a decade." },
+    { speaker:'kai', text:"And what would I actually be doing?" },
+    { speaker:'argent', text:"Feeling things, so a thousand identical jackets can feel them too. Efficient. Everyone wins." },
+    { speaker:'kai', text:"That's not — that's not what this is." },
+    { speaker:'argent', text:"(a small, unbothered smile) It rarely feels like it, at the start. Think about it. I'm not going anywhere. The Guild never does." }
+  ],
+  ch3_intro: [
+    { narration:true, text:"The Grey Mile doesn't announce itself so much as arrive — the color leaches out of the street a block before the first factory gate." },
+    { speaker:'vesper', text:"Every window the exact same warm white. Every mannequin the exact same smile. Efficient, the way a hospital corridor is efficient." },
+    { speaker:'kai', text:"This is where the Guild makes everything?" },
+    { speaker:'vesper', text:"This is where the Guild un-makes everything, and calls it making. They buy up Echo-rich vintage by the truckload, strip the memory out — bleaching, they call it, cheerfully — and print the silhouette a thousand times over. Efficient. Profitable. Hollow all the way through." },
+    { speaker:'vesper', text:"I used to show here, you know. Before. There's a client waiting on us who remembers those days better than most. Come on — best you hear this part from her, not me." }
+  ],
+  thessaly_intro: [
+    { narration:true, text:"She's older than Vesper, dressed with a precision that looks exhausting to maintain, and she doesn't so much sit down as arrange herself." },
+    { speaker:'vesper', text:"Thessaly. Didn't expect you on this side of the Mile." },
+    { speaker:'thessaly', text:"Neither did I. There's a reunion tonight — old Row associates, the kind who all quietly stopped returning my calls once I stopped placing at the Spire." },
+    { speaker:'thessaly', text:"I want to walk in like I never needed their approval. And maybe — don't repeat this — like I've forgiven myself for wanting it anyway." },
+    { speaker:'vesper', text:"That's a lot to ask of a bodice." },
+    { speaker:'thessaly', text:"You'd know. You used to make it look easy." }
+  ],
+  vesper_past: [
+    { narration:true, text:"Thessaly leaves without a backward glance, which somehow reads as a compliment. Vesper stares at the door long after the bell's gone quiet." },
+    { speaker:'kai', text:"You used to show at the Spire. Everyone keeps almost-mentioning it and then not." },
+    { speaker:'vesper', text:"Everyone's being polite, which isn't like this district. I had a mentor. Corvin Ashe — you won't find that name anywhere official anymore. The Guild decided he was too influential and not agreeable enough, and 'unstitched' him." },
+    { speaker:'kai', text:"Unstitched?" },
+    { speaker:'vesper', text:"Erased. Not killed — worse, in this world. Every credit, every Wearable with his name in the seam, quietly bought up and bleached. Within a year it was like he'd never threaded a needle in his life. I stopped showing not long after. Couldn't stomach the Spire without him in the room." },
+    { speaker:'kai', text:"I'm sorry." },
+    { speaker:'vesper', text:"So was I. Still am, some days. It's why I don't love watching a bright young Barehand get sweet-talked by a Guild man with unwrinkled sleeves." }
+  ],
+  ch4_decision: [
+    { narration:true, text:"Argent finds {{name}} alone this time — no crowd, no fountain, just the two of them and a stack of practice swatches." },
+    { speaker:'argent', text:"The offer's still open. Better, actually — word's gotten around, about the scarf, the jacket. You're better than I expected, and I don't say that often." },
+    { speaker:'argent', text:"One signature. Studio, salary, your name on a label that ships to every city with a Row of its own. Or — you keep patching thin coats for tea-stall owners in a basement that smells like hot iron." },
+    { speaker:'argent', text:"I'm not the villain here, whatever Vesper's told you. I'm offering you a bigger room to work in." },
+    { speaker:'kai', text:"A bigger room where I stop listening and start manufacturing what I heard. That's the job, isn't it." },
+    { speaker:'argent', text:"The job is being heard by more than eleven people in a back room. Think about what you actually want. Not what Vesper wants for you." },
+    { narration:true, text:"How do you answer him?", choices:[
+        { label:"“You can bleach a thousand coats. You'll never touch what's underneath.”", flag:'ch4choice', value:'defiant' },
+        { label:"“I'm not angry at you. I just don't want what you're selling.”", flag:'ch4choice', value:'compassionate' },
+        { label:"Say nothing. Go back to the needle in your hand.", flag:'ch4choice', value:'quiet' }
+      ] }
+  ],
+  ch5_intro: [
+    { narration:true, text:"The Runway Spire looks, up close, like a lighthouse built by someone who'd only ever heard lighthouses described. One night a year, anyone can apply for a slot on its floor." },
+    { speaker:'vesper', text:"I haven't stood in this lobby in ten years. My knees are furious with me." },
+    { speaker:'kai', text:"Are you nervous?" },
+    { speaker:'vesper', text:"Terrified. Wonderful feeling, actually — means it still matters. Three clients tonight, whoever finds your station first. Whatever you've learned, it's yours now. I'm just here to watch." }
+  ],
+  showcase_nettle_intro: [
+    { narration:true, text:"Nettle vaults the velvet rope like it personally insulted her." },
+    { speaker:'nettle', text:"I paid an actual application fee to be your FIRST showcase client, do you understand the sacrifice — okay, Vesper covered it, but still. Dress me like you mean it." }
+  ],
+  showcase_corvin_intro: [
+    { narration:true, text:"The next patron doesn't give a name. Just a nod, and a fold of fabric that looks older than {{name}} is." },
+    { speaker:'corvin', text:"Surprise me. I've had enough of predictable things tonight." }
+  ],
+  showcase_corvin_reveal: [
+    { narration:true, text:"He looks past {{name}} — to Vesper, gone very still at the edge of the station." },
+    { speaker:'corvin', text:"Hello, old friend. It's been a long time since anyone in this district quoted me on purpose." },
+    { speaker:'vesper', text:"Corvin. You're supposed to be—" },
+    { speaker:'corvin', text:"Unstitched. I know what they call it. Turns out you can survive most things, if you're stubborn enough, and if you stop putting your name on anything." },
+    { speaker:'vesper', text:"...I thought—" },
+    { speaker:'corvin', text:"I know what you thought. I let you keep thinking it — safer for both of us, for a while. (to Kai) Your apprentice has good hands, Vesper. An even better teacher, it seems." },
+    { speaker:'vesper', text:"(not quite steady) Shut up and let me look at you." }
+  ],
+  showcase_stranger_intro: [
+    { narration:true, text:"The last one isn't on any list. They hover at the edge of the station, clearly deciding whether to bolt." },
+    { speaker:'stranger', text:"Sorry — sorry, I'm not actually — I just saw the lights from the street and I don't really belong back here, I just wanted to see it up close, I can go—" },
+    { speaker:'kai', text:"You can stay. Sit down — let's make you something." }
+  ],
+  showcase_stranger_reveal: [
+    { narration:true, text:"{{name}} recognizes the look on their face. It's the one he must have worn, that first night, standing in Vesper's doorway not believing any of this was real." },
+    { speaker:'kai', text:"Hey — you don't have to explain how you got back here. I didn't either, not really." },
+    { speaker:'stranger', text:"...Yeah?" },
+    { speaker:'kai', text:"Yeah. Come back Tuesdays. Vesper always needs someone to sweep." },
+    { speaker:'vesper', text:"(not looking up from her work, smiling anyway) I heard that. I'm allowing it." }
+  ],
+  showcase_outro: [
+    { narration:true, text:"Three looks, three names in the Spire's ledger. Whatever happens next, that part's done, and can't be undone." },
+    { narration:true, text:"Then the lobby goes quiet in the specific way a room goes quiet right before someone unwelcome walks into it." },
+    { speaker:'argent', text:"Quite a night. The judges are talking about the tea-stall scarf, if you're curious. Word travels fast, when it's inconvenient for me." }
+  ],
+  finale: [
+    { speaker:'argent', text:"I'll be brief, since I'm told brevity's a virtue down here. The Guild would like to acquire tonight's collection. All of it. Generous terms — better than the studio offer, even." },
+    { speaker:'vesper', text:"He means bleach it. Print it. Sell it back to this district with the memory scraped out, at triple the price." },
+    { speaker:'argent', text:"I mean give it an audience larger than this lobby will ever hold. Semantics, Vesper." },
+    { speaker:'corvin', text:"(stepping forward, calm) I believe that's my old chair you're standing near, Roman. Sit in it, if you'd like. I'll wait." },
+    { narration:true, text:"Argent's composure slips — half a second, no more — at a face he clearly thought was gone for good." },
+    { speaker:'argent', text:"...Corvin. That's — that's not possible." },
+    { speaker:'corvin', text:"And yet. Say what you came to say to the boy, Roman. I'd like to hear it knowing I'm listening." },
+    { narration:true, text:"Every eye in the lobby is on {{name}} now. What do you say?", choices:[
+        { label:"“You can bleach a thousand coats. You'll never touch what's underneath.”", flag:'finalechoice', value:'defiant' },
+        { label:"“I'm not angry at you. I just don't want what you're selling.”", flag:'finalechoice', value:'compassionate' },
+        { label:"Say nothing. Just finish the stitch still in your hand.", flag:'finalechoice', value:'quiet' }
+      ] }
+  ]
+};
+
+/* ---------------------------------------------------------------- Codex */
+const CODEX_ENTRIES = [
+  { id:'howto', title:'Reading, Cutting, Fitting', text:"Three things a tailor does: listen to what a fabric remembers, cut it clean, and dress someone in a way that actually answers what they asked for — even when they didn't say it outright. That's the whole job." },
+  { id:'hemline', title:'The Hemline', text:"A seam between the city you know and the one it doesn't advertise. You don't find the Hemline on a map. You fall into it, usually through cloth that held onto something real." },
+  { id:'echoes', title:'Echoes', text:"The traces a garment keeps of everything it's lived through — a wedding, a funeral, a Tuesday that changed someone's life. Most people can't feel them at all. You can." },
+  { id:'barehand', title:'Barehand', text:"Someone who feels Echoes without a filter — raw, unmuted, occasionally overwhelmed. Rare. Once a generation, maybe. Vesper calls it a gift. It doesn't always feel like one." },
+  { id:'thimbleGloves', title:'Thimble Gloves', text:"Standard-issue protection for anyone handling Hemline cloth. Mutes the Echoes to a comfortable hum. You don't own a pair. Doesn't seem to be an option, either way." },
+  { id:'flatclothWearables', title:'Flatcloth & Wearables', text:"Flatcloth: clothes with no memory in them, mass-made, technically fine, entirely forgettable. Wearables: clothes stitched with real Echoes inside. The difference is invisible until you put one on." },
+  { id:'fraying', title:'Fraying', text:"What happens when a Barehand takes in more feeling than they can hold. Not fatal. Rarely pleasant. Vesper calls it 'the cost of doing business honestly.'" },
+  { id:'basementBolt', title:'The Basement Bolt', text:"Vesper's shop, half below street level, smells permanently of cedar and hot iron. The sign out front hasn't been legible in a decade. Regulars don't need it." },
+  { id:'thriftersRow', title:"Thrifter's Row", text:"A sprawling, joyfully chaotic market where half the Hemline's Echo-rich fabric changes hands. Haggling is closer to a love language here than a transaction." },
+  { id:'nettle', title:'Nettle', text:"Vesper's other apprentice, technically. Mostly runs Thrifter's Row negotiating impossible trades. Talks fast, laughs faster, has never once been on time." },
+  { id:'guild', title:'The Silhouette Guild', text:"The official face of Hemline fashion. Massive, polished, everywhere. They set the Trend Cycles the whole district chases. Officially, they preserve the craft. Ask Vesper sometime, when she's had a drink." },
+  { id:'argent', title:'Roman Argent', text:"The Guild's Director of Acquisitions. Charming in the specific way of someone who's never once needed to raise his voice to get what he wants." },
+  { id:'greyMile', title:'The Grey Mile', text:"The Guild's manufacturing district. Everything is the correct temperature, the correct color, the correct amount of nothing." },
+  { id:'bleaching', title:'Bleaching & Trend Cycles', text:"The Guild's method: buy up Echo-rich vintage, strip the memory out — bleaching — and reprint the silhouette a thousand times over. Efficient. Profitable. Hollow." },
+  { id:'vesper', title:'Vesper Loom', text:"Once the Hemline's most celebrated Wearable-maker. Now a recluse who mends coats and swears at apprentices. Doesn't talk about why she stopped showing at the Spire. You're starting to understand why." },
+  { id:'runwaySpire', title:'The Runway Spire', text:"Where the Hemline's biggest names get made, or don't. One night a year, anyone can apply for a slot on its floor. Almost nobody gets one twice." },
+  { id:'corvin', title:'Corvin Ashe', text:"A name Vesper doesn't say out loud if she can help it. Her mentor, once. 'Unstitched' by the Guild, years back — erased so thoroughly it's like he never threaded a needle. Presumed gone. Wasn't." }
+];
+
+/* ============================================================================
+   STATE
+   ============================================================================ */
+const state = {
+  playerName: 'Kai',
+  renownLog: [],
+  slotCount: 2,
+  unlockedPalettes: new Set(['bone','rosewater']),
+  unlockedSilhouettes: new Set(['draped','tailored']),
+  fragments: [],
+  fragUid: 0,
+  currentGarment: { silhouette:null, palette:null, slots:[] },
+  activeClient: null,
+  flags: {},
+  codexUnlocked: new Set(),
+  chapterLabel: '—'
+};
+
+/* ============================================================================
+   CORE HELPERS
+   ============================================================================ */
+function formatText(str){ return String(str).split('{{name}}').join(state.playerName); }
+function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function unlockCodex(ids){ ids.forEach(function(id){ state.codexUnlocked.add(id); }); }
+function unlockContent(opts){
+  if(opts.palettes) opts.palettes.forEach(function(p){ state.unlockedPalettes.add(p); });
+  if(opts.silhouettes) opts.silhouettes.forEach(function(s){ state.unlockedSilhouettes.add(s); });
+}
+
+const HUD_SCREENS = { 'screen-dialogue':1, 'screen-echo':1, 'screen-cut':1, 'screen-assembly':1 };
+function showScreen(id){
+  document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('active'); });
+  const target = $(id);
+  if(target) target.classList.add('active');
+  const hud = $('hud');
+  if(HUD_SCREENS[id]) hud.classList.add('show'); else hud.classList.remove('show');
+  updateHud();
+}
+
+let activeBgLayer = 0;
+function setBackground(bgClass){
+  const layers = [$('bgLayer0'), $('bgLayer1')];
+  const next = 1 - activeBgLayer;
+  layers[next].className = 'scene-bg-layer ' + bgClass;
+  void layers[next].offsetWidth;
+  layers[next].style.opacity = '1';
+  layers[activeBgLayer].style.opacity = '0';
+  activeBgLayer = next;
+}
+
+function updateHud(){
+  $('hudChapter').textContent = state.chapterLabel;
+  const avg = state.renownLog.length ? Math.round(state.renownLog.reduce(function(a,b){ return a+b; },0)/state.renownLog.length) : 0;
+  $('hudRenown').textContent = avg;
+}
+
+function renderJournal(){
+  const list = $('journalList');
+  list.innerHTML = '';
+  if(state.codexUnlocked.size === 0){
+    list.innerHTML = '<p class="journal-empty">Nothing learned yet. Keep going.</p>';
+    return;
+  }
+  CODEX_ENTRIES.forEach(function(entry){
+    if(!state.codexUnlocked.has(entry.id)) return;
+    const div = document.createElement('div');
+    div.className = 'journal-entry';
+    const h4 = document.createElement('h4'); h4.textContent = entry.title;
+    const p = document.createElement('p'); p.textContent = entry.text;
+    div.appendChild(h4); div.appendChild(p);
+    list.appendChild(div);
+  });
+}
+function openJournal(){ renderJournal(); $('journalOverlay').classList.add('open'); }
+function closeJournal(){ $('journalOverlay').classList.remove('open'); }
+
+function setupTitleParticles(){
+  const container = $('titleParticles');
+  const glyphs = ['\u2726','\u2727','\u22C6','\u00B7'];
+  for(let i=0;i<10;i++){
+    const p = document.createElement('div');
+    p.className = 'title-particle';
+    p.textContent = glyphs[i % glyphs.length];
+    p.style.left = (Math.random()*94+3) + '%';
+    p.style.fontSize = (10 + Math.random()*11) + 'px';
+    p.style.animationDuration = (11 + Math.random()*9) + 's';
+    p.style.animationDelay = (Math.random()*10) + 's';
+    container.appendChild(p);
+  }
+}
+
+/* ============================================================================
+   DIALOGUE ENGINE
+   ============================================================================ */
+let typingTimer = null;
+let isTyping = false;
+let pendingTypeDone = null;
+let currentLineText = '';
+
+function playDialogue(scriptOrKey){
+  const lines = typeof scriptOrKey === 'string' ? DIALOGUE_SCRIPTS[scriptOrKey] : scriptOrKey;
+  if(!lines || !lines.length){ console.warn('Missing/empty dialogue script', scriptOrKey); return Promise.resolve(); }
+
+  return new Promise(function(resolve){
+    showScreen('screen-dialogue');
+    const box = $('dlgBox');
+    box.style.animation = 'none'; void box.offsetWidth; box.style.animation = '';
+    let idx = -1;
+
+    function completeTyping(){
+      clearInterval(typingTimer);
+      $('dlgText').textContent = currentLineText;
+      isTyping = false;
+      const cb = pendingTypeDone; pendingTypeDone = null;
+      if(cb) cb();
+    }
+
+    function typeText(text, onDone){
+      const target = $('dlgText');
+      target.textContent = '';
+      isTyping = true;
+      pendingTypeDone = onDone || null;
+      let i = 0;
+      clearInterval(typingTimer);
+      typingTimer = setInterval(function(){
+        i++;
+        target.textContent = text.slice(0, i);
+        if(i >= text.length) completeTyping();
+      }, 16);
+    }
+
+    function renderChoices(choices){
+      const wrap = $('dlgChoices');
+      wrap.innerHTML = '';
+      choices.forEach(function(c, i){
+        const btn = document.createElement('div');
+        btn.className = 'dlg-choice-btn';
+        btn.style.animationDelay = (i * 0.08) + 's';
+        btn.textContent = formatText(c.label);
+        btn.onclick = function(){
+          state.flags[c.flag] = c.value;
+          wrap.innerHTML = '';
+          goNext();
+        };
+        wrap.appendChild(btn);
+      });
+    }
+
+    function renderLine(){
+      const line = lines[idx];
+      currentLineText = formatText(line.text);
+      const isNarration = !!line.narration;
+      box.classList.toggle('narration-line', isNarration);
+      $('dlgName').textContent = isNarration ? '' : (line.speaker === 'kai' ? state.playerName : formatText((CHARACTERS[line.speaker] || {}).name || ''));
+      $('dlgPortraitWrap').innerHTML = isNarration ? '' : portraitSVG(line.speaker);
+      $('dlgText').className = 'dlg-text' + (isNarration ? ' narration' : '');
+      $('dlgChoices').innerHTML = '';
+      $('dlgHint').style.display = line.choices ? 'none' : '';
+      typeText(currentLineText, function(){
+        if(line.choices) renderChoices(line.choices);
+      });
+    }
+
+    function goNext(){
+      idx++;
+      if(idx >= lines.length){
+        box.onclick = null;
+        resolve();
+        return;
+      }
+      renderLine();
+    }
+
+    function boxClick(){
+      const line = lines[idx];
+      if(line && line.choices){
+        if(isTyping) completeTyping();
+        return;
+      }
+      if(isTyping){ completeTyping(); return; }
+      goNext();
+    }
+
+    box.onclick = boxClick;
+    goNext();
+  });
+}
+
+/* ============================================================================
+   CHAPTER CARD
+   ============================================================================ */
+function showChapterCard(hudLabel, eyebrow, title, subtitle){
+  return new Promise(function(resolve){
+    state.chapterLabel = hudLabel;
+    $('chapterCardEyebrow').textContent = eyebrow;
+    $('chapterCardTitle').textContent = title;
+    $('chapterCardSubtitle').textContent = subtitle || '';
+    showScreen('screen-chaptercard');
+
+    const inner = document.querySelector('#screen-chaptercard .cc-inner');
+    inner.style.animation = 'none'; void inner.offsetWidth; inner.style.animation = '';
+    const stitch = document.querySelector('#screen-chaptercard .stitch-rule');
+    if(stitch){ stitch.classList.remove('animate'); void stitch.offsetWidth; stitch.classList.add('animate'); }
+
+    const card = $('screen-chaptercard');
+    card.onclick = function(){ card.onclick = null; resolve(); };
+  });
+}
+
+/* ============================================================================
+   ECHO READING — needle gauge minigame
+   ============================================================================ */
+const TRACK_HEIGHT = 240; /* keep in sync with .gauge-track CSS height */
+
+function runEchoReading(client){
+  return new Promise(function(resolve){
+    const cfg = COMMISSION_CONFIG[client.key];
+    showScreen('screen-echo');
+    $('echoTitle').textContent = 'Reading ' + client.swatchName;
+    $('swatchLabel').textContent = client.swatchName;
+    const poolColors = client.echoPool.map(function(id){ return ECHO_TYPES[id].color; });
+    $('swatchCard').style.background = 'linear-gradient(135deg,' + poolColors.join(',') + ')';
+    $('echoFragTray').innerHTML = '';
+    $('echoContinueWrap').innerHTML = '';
+    for(let i=0;i<3;i++){ const seg = $('fraySeg'+i); if(seg) seg.classList.remove('lit'); }
+
+    const zoneHeight = TRACK_HEIGHT * cfg.zoneFrac;
+    const zoneTop = (TRACK_HEIGHT - zoneHeight) / 2;
+    const zoneEl = $('catchZone');
+    zoneEl.style.top = zoneTop + 'px';
+    zoneEl.style.height = zoneHeight + 'px';
+
+    let misses = 0, pulseIndex = 0, gained = [], rafId = null, running = true;
+    const startTime = performance.now();
+
+    function needlePos(t){
+      const elapsed = (t - startTime) / 1000;
+      const phase = (Math.sin(elapsed * (2*Math.PI/cfg.period) - Math.PI/2) + 1) / 2;
+      return phase * TRACK_HEIGHT;
+    }
+    function frame(t){
+      if(!running) return;
+      $('needle').style.top = needlePos(t) + 'px';
+      rafId = requestAnimationFrame(frame);
+    }
+    rafId = requestAnimationFrame(frame);
+
+    function spawnFeedback(text, color){
+      const f = document.createElement('div');
+      f.className = 'catch-feedback';
+      f.textContent = text;
+      f.style.color = color;
+      f.style.left = '50%'; f.style.top = zoneTop + 'px'; f.style.transform = 'translateX(-50%)';
+      $('gaugeTrack').appendChild(f);
+      setTimeout(function(){ f.remove(); }, 1000);
+    }
+
+    function endReading(){
+      running = false;
+      cancelAnimationFrame(rafId);
+      $('catchBtn').onclick = null;
+      state.fragments = state.fragments.concat(gained);
+      const wrap = $('echoContinueWrap');
+      wrap.innerHTML = '';
+      if(misses >= 3){
+        const msg = document.createElement('p');
+        msg.style.cssText = 'font-size:.78rem;color:var(--parchment-faint);font-style:italic;margin:0 0 12px;text-align:center;max-width:320px;';
+        msg.textContent = 'The echo blurs \u2014 you pull your hands back before it overwhelms you.';
+        wrap.appendChild(msg);
+      }
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-primary';
+      btn.textContent = gained.length ? 'Continue' : 'Continue anyway';
+      btn.onclick = function(){ resolve(); };
+      wrap.appendChild(btn);
+    }
+
+    function onCatch(){
+      if(!running) return;
+      const pos = needlePos(performance.now());
+      const zoneCenter = zoneTop + zoneHeight/2;
+      const dist = Math.abs(pos - zoneCenter);
+      const halfZone = zoneHeight/2;
+      let success, label, color;
+      if(dist <= halfZone*0.4){ success=true; label='Perfect Catch'; color='var(--good)'; }
+      else if(dist <= halfZone){ success=true; label='Good Catch'; color='var(--brass-bright)'; }
+      else { success=false; label='Missed'; color='var(--ember-bright)'; }
+      spawnFeedback(label, color);
+
+      if(success){
+        const echoId = client.echoPool[pulseIndex % client.echoPool.length];
+        const echo = ECHO_TYPES[echoId];
+        gained.push({ uid:'f'+(state.fragUid++), type:echoId });
+        const chip = document.createElement('div');
+        chip.className = 'frag-chip';
+        chip.style.borderColor = echo.color;
+        chip.innerHTML = echo.sigil(echo.color);
+        chip.title = echo.name;
+        $('echoFragTray').appendChild(chip);
+      } else {
+        misses++;
+        const seg = $('fraySeg'+(misses-1));
+        if(seg) seg.classList.add('lit');
+      }
+      pulseIndex++;
+      if(pulseIndex >= cfg.pulses || misses >= 3) endReading();
+    }
+    $('catchBtn').onclick = onCatch;
+  });
+}
+
+/* ============================================================================
+   PATTERN CUTTING — ring-timing minigame
+   ============================================================================ */
+const CUT_POINT_POSITIONS = [ {x:130,y:90}, {x:250,y:150}, {x:170,y:220} ];
+const CUT_PATTERN_PATH = "M60,40 Q190,10 320,50 L340,180 Q200,260 50,190 Z";
+
+function runCutting(client){
+  return new Promise(function(resolve){
+    const cfg = COMMISSION_CONFIG[client.key];
+    showScreen('screen-cut');
+    $('cutTitle').textContent = 'Cutting ' + client.pieceName;
+    $('patternOutline').innerHTML = '<path d="' + CUT_PATTERN_PATH + '"/>';
+    const pointsContainer = $('cutPointsContainer');
+    pointsContainer.innerHTML = '';
+    const progressEl = $('cutProgress');
+    progressEl.innerHTML = '';
+    $('cutContinueWrap').innerHTML = '';
+
+    const n = cfg.cutPoints;
+    const results = [];
+    for(let i=0;i<n;i++){
+      const dot = document.createElement('div');
+      dot.className = 'cut-progress-dot' + (i===0 ? ' active' : '');
+      progressEl.appendChild(dot);
+    }
+
+    const pointEls = [];
+    for(let i=0;i<n;i++){
+      const pos = CUT_POINT_POSITIONS[i % CUT_POINT_POSITIONS.length];
+      const wrap = document.createElement('div');
+      wrap.className = 'cut-point pending';
+      wrap.style.left = (pos.x/380*100) + '%';
+      wrap.style.top = (pos.y/280*100) + '%';
+      const ring = document.createElement('div');
+      ring.className = 'cut-ring';
+      const label = document.createElement('div');
+      label.className = 'cut-result-label';
+      wrap.appendChild(ring);
+      wrap.appendChild(label);
+      pointsContainer.appendChild(wrap);
+      pointEls.push({ wrap:wrap, ring:ring, label:label });
+    }
+
+    function finishCutting(){
+      const avg = results.reduce(function(a,b){ return a+b; }, 0) / results.length;
+      state.lastCraft = avg;
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-primary';
+      btn.textContent = 'Continue';
+      btn.onclick = function(){ resolve(); };
+      $('cutContinueWrap').appendChild(btn);
+    }
+
+    function runPoint(i){
+      const duration = cfg.cutDurations[i] || cfg.cutDurations[cfg.cutDurations.length-1];
+      const pe = pointEls[i];
+      pe.wrap.classList.remove('pending');
+      pe.ring.style.transition = 'none';
+      pe.ring.style.transform = 'scale(3)';
+      pe.ring.style.opacity = '0.9';
+      void pe.ring.offsetWidth;
+      requestAnimationFrame(function(){
+        pe.ring.style.transition = 'transform ' + duration + 'ms linear, opacity ' + duration + 'ms linear';
+        pe.ring.style.transform = 'scale(1)';
+        pe.ring.style.opacity = '0.5';
+      });
+      const startTime = performance.now();
+      let done = false;
+      const timeoutId = setTimeout(function(){ if(!done) settle('miss'); }, duration + 500);
+
+      function settle(forcedQuality){
+        if(done) return;
+        done = true;
+        clearTimeout(timeoutId);
+        pe.wrap.removeEventListener('click', onClick);
+        let quality = forcedQuality;
+        if(!quality){
+          const elapsed = performance.now() - startTime;
+          const diff = Math.abs(1 - elapsed/duration);
+          quality = diff <= 0.08 ? 'perfect' : diff <= 0.22 ? 'good' : diff <= 0.45 ? 'fair' : 'miss';
+        }
+        const scoreMap = { perfect:100, good:78, fair:52, miss:20 };
+        const labelMap = { perfect:'Clean Cut', good:'Good Edge', fair:'Rough Edge', miss:'Torn' };
+        const colorMap = { perfect:'var(--good)', good:'var(--brass-bright)', fair:'var(--ember-bright)', miss:'var(--ember)' };
+        results.push(scoreMap[quality]);
+        pe.ring.style.transition = 'opacity .3s ease';
+        pe.ring.style.opacity = '0';
+        pe.wrap.classList.add('done');
+        pe.label.textContent = labelMap[quality];
+        pe.label.style.color = colorMap[quality];
+        pe.label.classList.remove('show'); void pe.label.offsetWidth; pe.label.classList.add('show');
+        const dots = progressEl.querySelectorAll('.cut-progress-dot');
+        dots[i].classList.remove('active'); dots[i].classList.add('filled');
+        if(dots[i+1]) dots[i+1].classList.add('active');
+        setTimeout(function(){ if(i+1 < n) runPoint(i+1); else finishCutting(); }, 550);
+      }
+      function onClick(){ settle(null); }
+      pe.wrap.addEventListener('click', onClick);
+    }
+
+    runPoint(0);
+  });
+}
+
+/* ============================================================================
+   ASSEMBLY — silhouette, palette, echo slots, mannequin rendering
+   ============================================================================ */
+const SLOT_POSITIONS = [ {x:98,y:145}, {x:142,y:145}, {x:120,y:225} ];
+
+function renderGarmentLayer(){
+  const layer = $('garmentLayer');
+  const sil = state.currentGarment.silhouette;
+  const pal = state.currentGarment.palette;
+  layer.innerHTML = sil ? SILHOUETTES[sil].svg : '';
+  if(pal){
+    layer.style.setProperty('--garment-primary', PALETTES[pal].primary);
+    layer.style.setProperty('--garment-secondary', PALETTES[pal].secondary);
+  }
+}
+
+function renderSlots(){
+  const overlay = $('slotsOverlay');
+  overlay.innerHTML = '';
+  for(let i=0;i<state.slotCount;i++){
+    const pos = SLOT_POSITIONS[i % SLOT_POSITIONS.length];
+    const slotEl = document.createElement('div');
+    slotEl.className = 'echo-slot';
+    slotEl.style.left = (pos.x/240*100) + '%';
+    slotEl.style.top = (pos.y/360*100) + '%';
+    const frag = state.currentGarment.slots[i];
+    if(frag){
+      const echo = ECHO_TYPES[frag.type];
+      slotEl.classList.add('filled');
+      slotEl.style.color = echo.color;
+      slotEl.style.borderColor = echo.color;
+      slotEl.innerHTML = echo.sigil(echo.color);
+      slotEl.title = echo.name + ' \u2014 click to remove';
+    } else {
+      slotEl.title = 'Empty echo slot';
+    }
+    slotEl.onclick = (function(index){
+      return function(){
+        if(state.currentGarment.slots[index]){
+          state.currentGarment.slots[index] = null;
+          renderAssemblyUI();
+        }
+      };
+    })(i);
+    overlay.appendChild(slotEl);
+  }
+}
+
+function renderOptionRow(containerId, dataTable, unlockedSet, currentValue, onSelect){
+  const container = $(containerId);
+  container.innerHTML = '';
+  Object.keys(dataTable).forEach(function(key){
+    const item = dataTable[key];
+    const unlocked = unlockedSet.has(key);
+    const card = document.createElement('div');
+    card.className = 'opt-card' + (currentValue===key ? ' selected' : '') + (unlocked ? '' : ' opt-locked');
+    if(item.primary){
+      const dot = document.createElement('span');
+      dot.className = 'opt-swatch-dot';
+      dot.style.background = 'linear-gradient(135deg,' + item.primary + ',' + item.secondary + ')';
+      card.appendChild(dot);
+    }
+    const label = document.createElement('span');
+    label.textContent = unlocked ? item.name : '???';
+    card.appendChild(label);
+    if(unlocked) card.onclick = function(){ onSelect(key); };
+    container.appendChild(card);
+  });
+}
+
+function renderFragmentTray(){
+  const container = $('fragmentTray');
+  container.innerHTML = '';
+  const slottedUids = state.currentGarment.slots.filter(Boolean).map(function(f){ return f.uid; });
+  const available = state.fragments.filter(function(f){ return slottedUids.indexOf(f.uid) === -1; });
+  if(!available.length){
+    container.innerHTML = '<p class="frag-tray-empty">Nothing left in hand \u2014 whatever\u2019s already placed is what you\u2019ve got.</p>';
+    return;
+  }
+  available.forEach(function(frag){
+    const echo = ECHO_TYPES[frag.type];
+    const chip = document.createElement('div');
+    chip.className = 'frag-chip trayable';
+    chip.style.borderColor = echo.color;
+    chip.innerHTML = echo.sigil(echo.color);
+    chip.title = echo.name;
+    chip.onclick = function(){
+      const emptyIndex = state.currentGarment.slots.findIndex(function(s){ return !s; });
+      if(emptyIndex === -1) return;
+      state.currentGarment.slots[emptyIndex] = frag;
+      renderAssemblyUI();
+    };
+    container.appendChild(chip);
+  });
+}
+
+function renderAssemblyUI(){
+  renderGarmentLayer();
+  renderSlots();
+  renderOptionRow('silhouetteOptions', SILHOUETTES, state.unlockedSilhouettes, state.currentGarment.silhouette, function(key){
+    state.currentGarment.silhouette = key; renderAssemblyUI();
+  });
+  renderOptionRow('paletteOptions', PALETTES, state.unlockedPalettes, state.currentGarment.palette, function(key){
+    state.currentGarment.palette = key; renderAssemblyUI();
+  });
+  renderFragmentTray();
+  const canSubmit = !!(state.currentGarment.silhouette && state.currentGarment.palette);
+  const submitBtn = $('submitLookBtn');
+  submitBtn.style.opacity = canSubmit ? '1' : '.4';
+  submitBtn.style.pointerEvents = canSubmit ? 'auto' : 'none';
+}
+
+function runAssembly(client){
+  return new Promise(function(resolve){
+    showScreen('screen-assembly');
+    $('assemblyTitle').textContent = 'Assembling ' + client.pieceName;
+    $('assemblyOptionsPanel').classList.remove('hide');
+    $('assemblyReveal').classList.remove('show');
+    renderAssemblyUI();
+    $('submitLookBtn').onclick = function(){
+      if(!state.currentGarment.silhouette || !state.currentGarment.palette) return;
+      resolve();
+    };
+  });
+}
+
+/* ============================================================================
+   RESONANCE
+   ============================================================================ */
+function calculateResonance(client){
+  const g = state.currentGarment;
+  const maxPerSlot = 60 / state.slotCount;
+  let echoRaw = 0;
+  g.slots.forEach(function(frag){
+    if(!frag) return;
+    const w = client.echoWeight[frag.type] !== undefined ? client.echoWeight[frag.type] : 0.3;
+    echoRaw += maxPerSlot * w;
+  });
+  const echoScore = clamp(echoRaw, 0, 60);
+  const palW = client.paletteWeight[g.palette] !== undefined ? client.paletteWeight[g.palette] : 0.2;
+  const paletteScore = clamp(20 * palW, 0, 20);
+  const silW = client.silhouetteWeight[g.silhouette] !== undefined ? client.silhouetteWeight[g.silhouette] : 0.2;
+  const silhouetteScore = clamp(20 * silW, 0, 20);
+  const designScore = echoScore + paletteScore + silhouetteScore;
+  const craft = (typeof state.lastCraft === 'number') ? state.lastCraft : 70;
+  const finalScore = clamp(Math.round(designScore*0.8 + craft*0.2), 0, 100);
+
+  let tier, tierLabel;
+  if(finalScore >= 90){ tier='perfect'; tierLabel='Perfect Resonance'; }
+  else if(finalScore >= 75){ tier='strong'; tierLabel='Strong Resonance'; }
+  else if(finalScore >= 55){ tier='adequate'; tierLabel='Fond Resonance'; }
+  else { tier='weak'; tierLabel='Still Finding Its Shape'; }
+  return { score: finalScore, tier: tier, tierLabel: tierLabel };
+}
+
+function animateCount(node, from, to, duration){
+  const start = performance.now();
+  function step(t){
+    const p = clamp((t-start)/duration, 0, 1);
+    const eased = 1 - Math.pow(1-p, 3);
+    node.textContent = Math.round(from + (to-from)*eased);
+    if(p < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+function spawnBurst(){
+  const host = $('assemblyReveal');
+  for(let i=0;i<14;i++){
+    const p = document.createElement('div');
+    p.className = 'burst-particle';
+    const angle = Math.random()*Math.PI*2;
+    const dist = 60 + Math.random()*80;
+    p.style.setProperty('--dx', Math.cos(angle)*dist + 'px');
+    p.style.setProperty('--dy', Math.sin(angle)*dist + 'px');
+    p.style.background = (i%2) ? 'var(--brass-bright)' : 'var(--parchment)';
+    host.appendChild(p);
+    setTimeout(function(){ p.remove(); }, 950);
+  }
+}
+
+function showResonanceReveal(client){
+  return new Promise(function(resolve){
+    const result = calculateResonance(client);
+    $('assemblyOptionsPanel').classList.add('hide');
+    const reveal = $('assemblyReveal');
+
+    const silName = SILHOUETTES[state.currentGarment.silhouette].name;
+    const palName = PALETTES[state.currentGarment.palette].name;
+    const echoNames = state.currentGarment.slots.filter(Boolean).map(function(f){ return ECHO_TYPES[f.type].name; });
+    let summary = silName + ' in ' + palName;
+    if(echoNames.length) summary += ', carrying ' + echoNames.join(' & ');
+    $('revealSummary').innerHTML = 'Your look: <b>' + escapeHtml(summary) + '</b>';
+
+    $('meterScore').textContent = '0';
+    $('meterFill').style.width = '0%';
+    $('meterTier').textContent = '';
+    reveal.classList.add('show');
+
+    setTimeout(function(){
+      $('meterFill').style.width = result.score + '%';
+      animateCount($('meterScore'), 0, result.score, 1100);
+      $('meterTier').textContent = result.tierLabel;
+      if(result.tier === 'perfect') spawnBurst();
+    }, 150);
+
+    $('continueRevealBtn').onclick = function(){ resolve(result); };
+  });
+}
+
+/* ============================================================================
+   COMMISSION / SHOWCASE RUNNERS
+   ============================================================================ */
+async function runCommission(clientKey){
+  const client = CLIENTS[clientKey];
+  state.currentGarment = { silhouette:null, palette:null, slots:new Array(state.slotCount).fill(null) };
+  state.activeClient = clientKey;
+  state.lastCraft = 70;
+
+  await playDialogue(client.introScript);
+  await runEchoReading(client);
+  await runCutting(client);
+  await runAssembly(client);
+  const result = await showResonanceReveal(client);
+  state.renownLog.push(result.score);
+  await playDialogue(client.reactions[result.tier]);
+  if(client.followup) await playDialogue(client.followup);
+  return result;
+}
+
+async function runShowcase(){
+  await runCommission('nettle');
+  await runCommission('corvin');
+  await runCommission('stranger');
+  await playDialogue('showcase_outro');
+}
+
+/* ============================================================================
+   ENDING
+   ============================================================================ */
+const ENDING_TEXT = {
+  tier3: { title:'The Thread Remembers', paragraphs:[
+    "By morning, three different people in three different districts are wearing something {{name}} made, and none of them can quite explain why they keep touching the seams.",
+    "The Spire's judges don't give out a trophy \u2014 the Hemline's never worked that way \u2014 but they do something rarer. They remember a name. Yours.",
+    "Vesper doesn't say she's proud. She doesn't have to. She just starts clearing a second cutting table, and doesn't ask before doing it."
+  ]},
+  tier2: { title:'Still Stitching', paragraphs:[
+    "Not every look landed exactly true tonight \u2014 one or two clients walked out wearing something good rather than something perfect. That's most nights, even for Vesper.",
+    "But something real got made, more than once, by hands that didn't know this world existed a few weeks ago. The Row's already talking.",
+    "Vesper hands {{name}} a key to the shop without ceremony, the way she hands over anything that actually matters to her."
+  ]},
+  tier1: { title:'The First Seam', paragraphs:[
+    "It wasn't a clean night. A few looks came out rougher than {{name}} wanted, and at least one client left more polite than moved.",
+    "Vesper doesn't pretend otherwise. \u201cFirst collections are supposed to be a little wrong,\u201d she says. \u201cMachines make things right the first time. That's exactly what we're not doing here.\u201d",
+    "It's not the triumphant ending the lobby was hoping for. It's something better suited to a real beginning \u2014 unfinished, and entirely {{name}}'s own."
+  ]}
+};
+const CHOICE_SIGNOFF = {
+  defiant: "Whatever comes next, it won't be quiet about it.",
+  compassionate: "Whatever comes next, it won't be bitter about it.",
+  quiet: "Whatever comes next, the needle's already back in your hand."
+};
+
+function computeEndingTier(){
+  if(!state.renownLog.length) return 'tier1';
+  const avg = state.renownLog.reduce(function(a,b){ return a+b; }, 0) / state.renownLog.length;
+  if(avg >= 80) return 'tier3';
+  if(avg >= 60) return 'tier2';
+  return 'tier1';
+}
+
+async function showEnding(){
+  const tier = computeEndingTier();
+  const data = ENDING_TEXT[tier];
+  $('endingTitle').textContent = data.title;
+  $('endingText').innerHTML = data.paragraphs.map(function(p){ return '<p>' + escapeHtml(formatText(p)) + '</p>'; }).join('');
+  const choiceKey = state.flags.finalechoice || state.flags.ch4choice || 'quiet';
+  $('endingSignoff').textContent = CHOICE_SIGNOFF[choiceKey] || '';
+  showScreen('screen-ending');
+}
+
+/* ============================================================================
+   MASTER SEQUENCE
+   ============================================================================ */
+async function playGame(){
+  await showChapterCard('Prologue', 'Prologue', 'The Bell Street Laundromat', '');
+  await playDialogue('prologue');
+
+  await showChapterCard('One', 'Chapter One', 'The Basement Bolt', 'Where the listening begins.');
+  await playDialogue('ch1_intro');
+  unlockCodex(['howto','hemline','echoes','barehand','thimbleGloves','flatclothWearables','basementBolt']);
+  await runCommission('tomas');
+  unlockCodex(['fraying']);
+  unlockContent({ palettes:['ember'], silhouettes:['layered'] });
+  await playDialogue('ch1_outro');
+
+  await showChapterCard('Two', 'Chapter Two', "Thrifter's Row", 'Where the fabric gets louder.');
+  await playDialogue('ch2_intro');
+  unlockCodex(['thriftersRow','nettle']);
+  await runCommission('oskar');
+  state.slotCount = 3;
+  unlockContent({ palettes:['midnight'], silhouettes:['asymmetric'] });
+  await playDialogue('argent_first');
+  unlockCodex(['guild','argent']);
+
+  await showChapterCard('Three', 'Chapter Three', 'The Grey Mile', 'Where the memory gets stripped out.');
+  await playDialogue('ch3_intro');
+  unlockCodex(['greyMile','bleaching']);
+  await runCommission('thessaly');
+  await playDialogue('vesper_past');
+  unlockCodex(['vesper']);
+
+  await showChapterCard('Four', 'Chapter Four', 'Turning the Needle', 'Where you decide what kind of tailor you are.');
+  await playDialogue('ch4_decision');
+
+  await showChapterCard('Five', 'Chapter Five', 'The Runway Spire', 'Where it all gets seen.');
+  await playDialogue('ch5_intro');
+  unlockCodex(['runwaySpire']);
+  await runShowcase();
+  unlockCodex(['corvin']);
+
+  await playDialogue('finale');
+  await showEnding();
+}
+
+/* ============================================================================
+   BOOT
+   ============================================================================ */
+function init(){
+  setupTitleParticles();
+  $('mannequinBase').innerHTML = MANNEQUIN_BASE_SVG;
+  $('bgLayer0').style.opacity = '1';
+
+  $('journalBtn').onclick = openJournal;
+  $('journalCloseBtn').onclick = closeJournal;
+  $('journalOverlay').onclick = function(e){ if(e.target.id === 'journalOverlay') closeJournal(); };
+
+  $('beginBtn').onclick = function(){
+    const v = $('nameInput').value.trim();
+    state.playerName = v ? v.slice(0,16) : 'Kai';
+    playGame().catch(function(err){ console.error('Hemline runtime error:', err); });
+  };
+  $('nameInput').addEventListener('keydown', function(e){
+    if(e.key === 'Enter') $('beginBtn').click();
+  });
+
+  $('playAgainBtn').onclick = function(){ location.reload(); };
+}
+init();
+</script>
+</body>
+</html>
